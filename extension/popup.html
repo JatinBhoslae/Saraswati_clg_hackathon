@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Productivity Assistant</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <div class="popup-header">
+      <div class="logo">🧠</div>
+      <h1>Focus Assistant</h1>
+      <p class="subtitle">Stay productive, stay focused</p>
+      <p class="today-date" id="todayDate"></p>
+    </div>
+
+    <!-- Focus Mode Toggle -->
+    <div class="focus-section">
+      <div class="focus-label">
+        <span class="focus-icon" id="focusIcon">😴</span>
+        <div>
+          <strong id="focusTitle">Focus Mode Off</strong>
+          <p id="focusDesc" class="focus-desc">Distractions are allowed</p>
+        </div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="focusToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- Status Info -->
+    <div class="status-section">
+      <div class="status-card" id="statusCard">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Monitoring your activity...</span>
+      </div>
+    </div>
+
+    <!-- Quick Stats (4 cards) -->
+    <div class="stats-section">
+      <div class="stat">
+        <span class="stat-value" id="todayBlocked">0</span>
+        <span class="stat-label">Blocked Today</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="focusTime">0m</span>
+        <span class="stat-label">Focus Time</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value stat-productive" id="productiveCount">0</span>
+        <span class="stat-label">Productive</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value stat-score" id="scoreValue">0%</span>
+        <span class="stat-label">Score</span>
+      </div>
+    </div>
+
+    <!-- Open Dashboard Link -->
+    <a href="http://localhost:5173" target="_blank" class="dashboard-link">
+      📊 Open Dashboard
+    </a>
+
+    <!-- Footer -->
+    <div class="popup-footer">
+      <p>v2.0 · Context-Aware Productivity Assistant</p>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

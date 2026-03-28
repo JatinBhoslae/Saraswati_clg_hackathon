@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Site Blocked — Focus Mode</title>
+  <link rel="stylesheet" href="blocked.css">
+</head>
+<body>
+  <div class="blocked-container">
+    <!-- Animated background particles -->
+    <div class="particles">
+      <div class="particle"></div>
+      <div class="particle"></div>
+      <div class="particle"></div>
+      <div class="particle"></div>
+      <div class="particle"></div>
+    </div>
+
+    <!-- Main content -->
+    <div class="blocked-content">
+      <div class="shield-icon">🛡️</div>
+      <h1>Site Blocked</h1>
+      <p class="blocked-url" id="blockedUrl">This site is blocked during Focus Mode</p>
+      <div class="divider"></div>
+      <p class="motivation" id="motivation">Stay focused. You're doing great! 💪</p>
+      <div class="tips">
+        <h3>💡 Instead, try:</h3>
+        <ul>
+          <li>🎯 Working on your current task</li>
+          <li>📚 Learning something new on Coursera</li>
+          <li>💻 Solving a problem on LeetCode</li>
+          <li>🧘 Taking a mindful 5-minute break</li>
+        </ul>
+      </div>
+      <button class="back-btn" onclick="history.back()">← Go Back</button>
+    </div>
+  </div>
+
+  <script>
+    // Show which site was blocked
+    const params = new URLSearchParams(window.location.search);
+    const url = params.get('url');
+    if (url) {
+      try {
+        const hostname = new URL(url).hostname.replace('www.', '');
+        document.getElementById('blockedUrl').textContent = `${hostname} is blocked during Focus Mode`;
+      } catch(e) {}
+    }
+
+    // Random motivational quotes
+    const quotes = [
+      "Stay focused. You're doing great! 💪",
+      "Success is the sum of small efforts, repeated. 🌟",
+      "Don't watch the clock; do what it does — keep going. ⏰",
+      "The secret of getting ahead is getting started. 🚀",
+      "You're stronger than the distraction. 🧠",
+      "Focus on being productive, not busy. 🎯",
+      "One hour of focused work > three hours of distracted work. ⚡",
+      "Your future self will thank you. 🙏"
+    ];
+    document.getElementById('motivation').textContent = 
+      quotes[Math.floor(Math.random() * quotes.length)];
+  </script>
+</body>
+</html>
