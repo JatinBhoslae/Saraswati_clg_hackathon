@@ -239,6 +239,74 @@
     }
   });
 
+  // -----------------------------------------------------------
+  // 📨 PLATFORM SCRAPERS
+  // -----------------------------------------------------------
+  function scrapeWhatsApp() {
+    if (!window.location.hostname.includes("whatsapp.com")) return;
+    
+    // Select the chat list items
+    const chatElements = document.querySelectorAll("div[aria-label='Chat list'] > div");
+    const chats = [];
+
+    chatElements.forEach((el, index) => {
+      if (index > 10) return; // Only 10 for performance
+      try {
+        const nameEl = el.querySelector("span[title]");
+        const snippetEl = el.querySelector("div[role='gridcell'] span:last-child");
+        const timeEl = el.querySelector("div[style*='color: var(--secondary)']"); 
+        
+        if (nameEl) {
+          chats.push({
+            id: index,
+            name: nameEl.title,
+            snippet: snippetEl ? snippetEl.innerText : "...",
+            time: timeEl ? timeEl.innerText : "",
+            unread: !!el.querySelector("span[aria-label*='unread']"),
+          });
+        }
+      } catch (err) {}
+    });
+
+    if (chats.length > 0) {
+      safeSendMessage({ type: "UPDATE_WHATSAPP_CHATS", chats });
+    }
+  }
+
+  function scrapeGmail() {
+    if (!window.location.hostname.includes("mail.google.com")) return;
+
+    const emailRows = document.querySelectorAll("tr.zA");
+    const emails = [];
+
+    emailRows.forEach((row, index) => {
+      if (index > 10) return;
+      try {
+        const sender = row.querySelector("span.bA4 span")?.innerText || "Unknown";
+        const subject = row.querySelector("span.bog")?.innerText || "No Subject";
+        const time = row.querySelector("td.xW")?.innerText || "";
+
+        emails.push({
+          id: index,
+          sender,
+          subject,
+          time,
+          isUnread: row.classList.contains("zE"),
+        });
+      } catch (err) {}
+    });
+
+    if (emails.length > 0) {
+      safeSendMessage({ type: "UPDATE_GMAIL_EMAILS", emails });
+    }
+  }
+
+  // Run scrapers every 10 seconds
+  registerInterval(() => {
+    scrapeWhatsApp();
+    scrapeGmail();
+  }, 10000);
+
   const titleNode = document.querySelector("title");
   if (titleNode) {
     titleObserver.observe(titleNode, { subtree: true, characterData: true, childList: true });

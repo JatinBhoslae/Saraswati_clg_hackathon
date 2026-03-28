@@ -131,6 +131,60 @@ let sessionStats = {
   startTime: Date.now(),
 };
 
+// -----------------------------------------------------------
+// 🔄 BACKEND FOCUS SYNC
+// Poll backend for focus mode state (in case toggled from dashboard)
+// -----------------------------------------------------------
+async function syncFocusState() {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/focus`);
+    if (res.ok) {
+      const { focusMode } = await res.json();
+      const stored = await chrome.storage.local.get("focusMode");
+      
+      if (focusMode !== stored.focusMode) {
+        console.log(`🔄 Syncing Focus Mode from Backend: ${focusMode ? "ON" : "OFF"}`);
+        applyFocusState(focusMode);
+      }
+    }
+  } catch (e) {
+    // console.warn("Focus sync failed");
+  }
+}
+
+// Helper to apply focus state to all browser components
+async function applyFocusState(newMode) {
+  await chrome.storage.local.set({ focusMode: newMode });
+
+  // 1. Block/Unblock notifications at browser level
+  if (chrome.contentSettings && chrome.contentSettings.notifications) {
+    if (newMode) {
+      chrome.contentSettings.notifications.set({ primaryPattern: "<all_urls>", setting: "block" });
+    } else {
+      chrome.contentSettings.notifications.clear({});
+    }
+  }
+
+  // 2. Broadcast to all tabs & Mute/Unmute
+  chrome.tabs.query({}, (tabs) => {
+    tabs.forEach((tab) => {
+      if (tab.id && !tab.url?.startsWith("chrome://")) {
+        // Mute tab to block sounds
+        chrome.tabs.update(tab.id, { muted: newMode }).catch(() => {});
+        
+        // Notify content scripts
+        chrome.tabs.sendMessage(tab.id, {
+          type: "FOCUS_MODE_CHANGED",
+          focusMode: newMode,
+        }).catch(() => {});
+      }
+    });
+  });
+}
+
+// Start polling
+setInterval(syncFocusState, 5000);
+
 // Reset session stats every 2 hours
 setInterval(() => {
   const elapsed = Date.now() - sessionStats.startTime;
@@ -284,43 +338,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "TOGGLE_FOCUS_MODE") {
     chrome.storage.local.get("focusMode", (data) => {
       const newMode = !data.focusMode;
-      chrome.storage.local.set({ focusMode: newMode }, () => {
-        // Sync with backend
-        fetch(`${BACKEND_URL}/api/focus`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ focusMode: newMode }),
-        }).catch(() => {});
+      
+      // Update store and backend
+      fetch(`${BACKEND_URL}/api/focus`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ focusMode: newMode }),
+      }).catch(() => {});
 
-        // ============================================================
-        // 🔕 BLOCK ALL NOTIFICATIONS AT BROWSER LEVEL
-        // ============================================================
-        if (chrome.contentSettings && chrome.contentSettings.notifications) {
-          if (newMode) {
-            chrome.contentSettings.notifications.set({ primaryPattern: "<all_urls>", setting: "block" });
-          } else {
-            chrome.contentSettings.notifications.clear({});
-          }
-        }
+      // Apply changes locally (mute, block, notify)
+      applyFocusState(newMode);
 
-        // Also broadcast to content scripts (for page-level overrides) and mute tabs
-        chrome.tabs.query({}, (tabs) => {
-          tabs.forEach((tab) => {
-            if (tab.id && !tab.url?.startsWith("chrome://")) {
-              // Mute tab to block notification sounds (like Whatsapp ding)
-              chrome.tabs.update(tab.id, { muted: newMode }).catch(() => {});
-              
-              chrome.tabs.sendMessage(tab.id, {
-                type: "FOCUS_MODE_CHANGED",
-                focusMode: newMode,
-              }).catch(() => {});
-            }
-          });
-        });
-
-        console.log(`🎯 Focus Mode ${newMode ? "ON — all notifications blocked" : "OFF — notifications restored"}`);
-        sendResponse({ focusMode: newMode });
-      });
+      console.log(`🎯 Focus Mode ${newMode ? "ON — all notifications blocked" : "OFF — notifications restored"}`);
+      sendResponse({ focusMode: newMode });
     });
     return true;
   }
@@ -361,6 +391,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Page unload report
   if (message.type === "PAGE_UNLOAD") {
     console.log("📦 Page closed:", message.data?.url, `(${message.data?.timeSpentSec}s)`);
+    return false;
+  }
+
+  // === PLATFORM DATA HANDLERS ===
+  if (message.type === "UPDATE_WHATSAPP_CHATS") {
+    fetch(`${BACKEND_URL}/api/whatsapp/chats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chats: message.chats }),
+    }).catch(() => {});
+    return false;
+  }
+
+  if (message.type === "UPDATE_GMAIL_EMAILS") {
+    fetch(`${BACKEND_URL}/api/gmail/emails`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ emails: message.emails }),
+    }).catch(() => {});
     return false;
   }
 });

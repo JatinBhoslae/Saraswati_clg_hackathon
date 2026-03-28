@@ -31,17 +31,83 @@ let customBlockedSites = [
 ];
 
 // -----------------------------------------------------------
+// 💬 Platform Specific Data
+// -----------------------------------------------------------
+let whatsappChats = [];
+let gmailEmails = [];
+
+// -----------------------------------------------------------
+// 🏆 Gamification Engine State
+// -----------------------------------------------------------
+let xp = 0;
+let level = 1;
+let dailyStreak = 0;
+let lastActiveDate = null;
+let achievements = [];
+let gmailTokens = null;
+
+// Achievement definitions
+const ACHIEVEMENT_LIST = [
+  { id: "focus_1h", title: "Unstoppable", desc: "1 hour of continuous focus", icon: "⭐" },
+  { id: "distr_0", title: "Clean Slate", desc: "No distractions for 2 hours", icon: "🛡️" },
+  { id: "streak_7", title: "Weekly Warrior", desc: "7-day focus streak", icon: "🔥" },
+];
+
+/** Calculate Level based on XP (standard RPG curve) */
+function calculateLevel(currentXp) {
+  return Math.floor(Math.sqrt(currentXp / 100)) + 1;
+}
+
+// -----------------------------------------------------------
 // 📤 STORE API
 // -----------------------------------------------------------
 const store = {
   // === LOG OPERATIONS ===
 
-  /** Add a log entry to the store */
+  /** Add a log entry to the store and award XP */
   addLog(logEntry) {
     activityLogs.push(logEntry);
+    
+    // Award XP based on productivity
+    if (logEntry.type === "productive") {
+      this.addXP(10);
+    } else if (logEntry.type === "distraction") {
+      // Small penalty or no XP
+    }
+
     // Auto-trim to prevent memory issues
     if (activityLogs.length > MAX_LOGS) {
       activityLogs = activityLogs.slice(-MAX_LOGS);
+    }
+
+    this.updateStreak();
+  },
+
+  /** Update daily streak logic */
+  updateStreak() {
+    const today = new Date().toISOString().split('T')[0];
+    if (lastActiveDate !== today) {
+      if (lastActiveDate) {
+        const lastDate = new Date(lastActiveDate);
+        const diff = Math.floor((new Date(today) - lastDate) / (1000 * 60 * 60 * 24));
+        if (diff === 1) {
+          dailyStreak += 1;
+        } else if (diff > 1) {
+          dailyStreak = 1;
+        }
+      } else {
+        dailyStreak = 1;
+      }
+      lastActiveDate = today;
+    }
+  },
+
+  addXP(amount) {
+    xp += amount;
+    const newLevel = calculateLevel(xp);
+    if (newLevel > level) {
+      level = newLevel;
+      // You could trigger a notification here if we had sockets
     }
   },
 
@@ -55,6 +121,38 @@ const store = {
     activityLogs = [];
   },
 
+  // === GAMIFICATION ACCESSORS ===
+  getGamificationStats() {
+    return {
+      xp,
+      level,
+      dailyStreak,
+      achievements,
+      nextLevelXp: Math.pow(level, 2) * 100,
+      availableAchievements: ACHIEVEMENT_LIST
+    };
+  },
+
+  // === PLATFORM OPERATIONS ===
+  setWhatsAppChats(chats) {
+    whatsappChats = chats;
+  },
+  getWhatsAppChats() {
+    return whatsappChats;
+  },
+  setGmailEmails(emails) {
+    gmailEmails = emails;
+  },
+  getGmailEmails() {
+    return gmailEmails;
+  },
+  setGmailTokens(tokens) {
+    gmailTokens = tokens;
+  },
+  getGmailTokens() {
+    return gmailTokens;
+  },
+
   // === FOCUS MODE OPERATIONS ===
 
   /** Set focus mode on/off and track time */
@@ -62,9 +160,15 @@ const store = {
     if (newMode && !focusMode) {
       // Starting focus mode
       focusModeStartTime = Date.now();
+      this.addXP(5); // Reward for starting focus
     } else if (!newMode && focusMode && focusModeStartTime) {
       // Ending focus mode — accumulate time
-      totalFocusTimeMs += Date.now() - focusModeStartTime;
+      const sessionMs = Date.now() - focusModeStartTime;
+      totalFocusTimeMs += sessionMs;
+      
+      // Reward deep work time (1 XP per minute)
+      this.addXP(Math.floor(sessionMs / 60000));
+      
       focusModeStartTime = null;
     }
     focusMode = newMode;

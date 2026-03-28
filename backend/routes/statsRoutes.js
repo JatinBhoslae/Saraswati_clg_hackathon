@@ -112,6 +112,8 @@ module.exports = function (store) {
         { name: "Distraction", value: distraction, color: "#ef4444" },
         { name: "Neutral", value: neutral, color: "#6366f1" },
       ],
+      // Gamification stats
+      gamification: store.getGamificationStats(),
     });
   });
 

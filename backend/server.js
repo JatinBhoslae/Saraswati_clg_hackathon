@@ -18,6 +18,8 @@ const logRoutes = require("./routes/logRoutes");
 const statsRoutes = require("./routes/statsRoutes");
 const focusRoutes = require("./routes/focusRoutes");
 const settingsRoutes = require("./routes/settingsRoutes");
+const platformRoutes = require("./routes/platformRoutes");
+const gmailRoutes = require("./routes/gmailRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -57,6 +59,8 @@ app.use("/api", logRoutes(store));
 app.use("/api", statsRoutes(store));
 app.use("/api", focusRoutes(store));
 app.use("/api", settingsRoutes(store));
+app.use("/api", platformRoutes(store));
+app.use("/api/gmail", gmailRoutes(store));
 
 // -----------------------------------------------------------
 // ❌ 404 Handler
@@ -76,7 +80,7 @@ app.listen(PORT, () => {
   ╔════════════════════════════════════════════════════════════╗
   ║  🧠 Context-Aware Productivity Assistant — Backend v2.0  ║
   ║  📡 API:       http://localhost:${PORT}                      ║
-  ║  📊 Dashboard: http://localhost:5173                      ║
+  ║  📊 Dashboard: http://localhost:5174                      ║
   ║  🤖 AI:        Classifier + Scorer + Suggestions active   ║
   ╚════════════════════════════════════════════════════════════╝
   `);

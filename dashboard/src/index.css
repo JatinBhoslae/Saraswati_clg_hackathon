@@ -1,1 +1,358 @@
+/* ============================================================
+   🎨 ARNAV-PRODUCTIVITY (v3.0) - PREMIUM DESIGN SYSTEM
+   Merged Styling for Tailwind v4 Compatibility
+   ============================================================ */
+
 @import "tailwindcss";
+
+@theme {
+  --color-background: #0B0F14;
+  --color-card: rgba(255, 255, 255, 0.05);
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-productive: #22C55E;
+  --color-distraction: #EF4444;
+  --color-neutral: #F59E0B;
+  --color-focus: #3B82F6;
+  --color-ai-from: #A855F7;
+  --color-ai-to: #EC4899;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-slate-200 antialiased overflow-x-hidden;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+/* Glassmorphism Classes */
+.glass {
+  @apply bg-card backdrop-blur-xl border border-border rounded-2xl;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.glass-hover {
+  @apply transition-all duration-300 hover:bg-[rgba(255,255,255,0.08)] hover:-translate-y-1 hover:shadow-2xl hover:border-[rgba(255,255,255,0.15)];
+}
+
+/* Productivity Score Ring Animation */
+.score-ring-enter {
+  stroke-dasharray: 283;
+  stroke-dashoffset: 283;
+  transition: stroke-dashoffset 1s ease-out;
+}
+
+/* Animated Gradient Text */
+.gradient-text {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400;
+  background-size: 200% auto;
+  animation: shine 5s linear infinite;
+}
+
+@keyframes shine {
+  to { background-position: 200% center; }
+}
+
+/* Custom Scrollbar for Premium Look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-background;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
+}
+
+/* Floating Animation */
+.floating {
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+/* Sidebar Specific */
+.nav-link-active {
+  @apply bg-white/5 border-l-2 border-indigo-500 text-white shadow-[inset_1px_0_0_0_rgba(99,102,241,0.5)];
+}
+
+/* Stat Cards Glow */
+.glow-productive { box-shadow: 0 0 20px rgba(34, 197, 94, 0.1); }
+.glow-distraction { box-shadow: 0 0 20px rgba(239, 68, 68, 0.1); }
+.glow-focus { box-shadow: 0 0 20px rgba(59, 130, 246, 0.2); }
+.glow-ai { box-shadow: 0 0 20px rgba(168, 85, 247, 0.15); }
+
+/* Recharts Custom Styling */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: rgba(255, 255, 255, 0.03);
+}
+
+.recharts-tooltip-cursor { fill: rgba(255, 255, 255, 0.05); }
+
+.custom-tooltip {
+  background-color: #151921;
+  @apply border border-white/10 p-3 rounded-xl shadow-2xl backdrop-blur-md;
+}
+
+/* ============================================================
+   🔕 Manage Platforms Card Styles
+   ============================================================ */
+
+.manage-hub-wrapper {
+  max-width: 1200px;
+  margin: 0 auto;
+  animation: fadeIn 0.8s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.manage-hub-header {
+  margin-bottom: 3rem;
+}
+
+.manage-hub-title-row {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.manage-hub-title-icon {
+  font-size: 3rem;
+  background: rgba(99, 102, 241, 0.1);
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20px;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.manage-hub-title {
+  font-size: 2.25rem;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.02em;
+}
+
+.manage-hub-subtitle {
+  color: #94a3b8;
+  font-size: 1.1rem;
+  max-width: 600px;
+}
+
+.manage-hub-status-bar {
+  display: flex;
+  gap: 2rem;
+  padding: 1rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  margin-top: 1rem;
+}
+
+.manage-hub-status-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #64748b;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.manage-hub-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.manage-hub-status-dot.active {
+  background: #25D366;
+  box-shadow: 0 0 10px rgba(37, 211, 102, 0.5);
+  animation: pulse 2s infinite;
+}
+
+.manage-hub-status-dot.warn {
+  background: #f59e0b;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.7; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.manage-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 2rem;
+  margin-bottom: 3rem;
+}
+
+.manage-platform-card {
+  position: relative;
+  background: #1a1a2e;
+  border: 1px solid var(--platform-border);
+  border-radius: 24px;
+  padding: 1.5rem;
+  text-align: left;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+}
+
+.manage-platform-card:hover {
+  transform: translateY(-8px);
+  background: #1f1f3a;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 20px var(--platform-glow);
+}
+
+.manage-card-glow {
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  opacity: 0;
+  transition: opacity 0.4s;
+  pointer-events: none;
+  filter: blur(60px);
+  z-index: 0;
+}
+
+.manage-platform-card:hover .manage-card-glow {
+  opacity: 0.1;
+}
+
+.manage-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+  position: relative;
+  z-index: 1;
+}
+
+.manage-card-icon-wrap {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+}
+
+.manage-card-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.manage-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.manage-badge.api {
+  background: rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+}
+
+.manage-badge.muted {
+  background: #f43f5e;
+  color: white;
+  animation: shake 2s infinite;
+}
+
+.manage-card-content {
+  flex: 1;
+  position: relative;
+  z-index: 1;
+}
+
+.manage-card-name {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--platform-color);
+  margin-bottom: 0.5rem;
+}
+
+.manage-card-desc {
+  font-size: 0.85rem;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.manage-card-footer {
+  margin-top: 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+.manage-card-cta {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #fff;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.manage-platform-card:hover .manage-card-cta {
+  opacity: 1;
+}
+
+.manage-card-indicator {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  box-shadow: 0 0 10px var(--platform-color);
+}
+
+.manage-hub-info-banner {
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.1);
+  border-radius: 20px;
+  padding: 1.5rem;
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.manage-hub-info-icon {
+  font-size: 2rem;
+  opacity: 0.8;
+}
+
+.manage-hub-info-title {
+  color: #fff;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.manage-hub-info-desc {
+  color: #64748b;
+  font-size: 0.875rem;
+}
