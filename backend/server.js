@@ -22,6 +22,8 @@ const platformRoutes = require("./routes/platformRoutes");
 const gmailRoutes = require("./routes/gmailRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const presetRoutes = require("./routes/presetRoutes");
+const scheduleRoutes = require("./routes/scheduleRoutes");
+const calendarRoutes = require("./routes/calendarRoutes");
 const app = express();
 const PORT = process.env.PORT || 5001;
  
@@ -67,6 +69,8 @@ app.use("/api", platformRoutes(store));
 app.use("/api/gmail", gmailRoutes(store));
 app.use("/api/notifications", notificationRoutes(store));
 app.use("/api/presets", presetRoutes(store));
+app.use("/api/schedule", scheduleRoutes(store));
+app.use("/api/calendar", calendarRoutes(store));
 
 // -----------------------------------------------------------
 // ❌ 404 Handler

@@ -9,7 +9,8 @@
     "notifications",
     "storage",
     "webNavigation",
-    "contentSettings"
+    "contentSettings",
+    "alarms"
   ],
   "host_permissions": [
     "http://localhost:5001/*",

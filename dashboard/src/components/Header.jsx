@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Zap, Shield, ShieldOff, Search, Bell } from "lucide-react";
 
-const Header = ({ focusMode, onToggleFocus }) => {
+const Header = ({ focusMode, onToggleFocus, onMenuToggle }) => {
   const location = useLocation();
   
   const getPageTitle = () => {
@@ -14,6 +14,8 @@ const Header = ({ focusMode, onToggleFocus }) => {
     if (path.startsWith("/manage/whatsapp")) return "WhatsApp Control";
     if (path.startsWith("/manage/gmail")) return "Gmail Inbox";
     if (path === "/settings") return "Preferences & Settings";
+    if (path === "/action-center") return "AI Action Center";
+    if (path === "/presets") return "Focus Presets";
     return "Focus Assistant";
   };
 
@@ -21,13 +23,21 @@ const Header = ({ focusMode, onToggleFocus }) => {
 
   return (
     <header className="flex justify-between items-center bg-background/80 border-b border-border p-6 sticky top-0 z-40 backdrop-blur-xl isolate">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-2xl font-extrabold text-white tracking-tighter">{title}</h2>
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full animate-pulse ${focusMode ? 'bg-indigo-500 shadow-[0_0_10px_#6366f1]' : 'bg-emerald-500 shadow-[0_0_10px_#10b981]'}`} />
-          <span className={`text-[10px] uppercase font-bold tracking-widest ${focusMode ? 'text-indigo-400' : 'text-emerald-400'}`}>
-            {focusMode ? "Focus Mode Active" : "Currently Monitoring"}
-          </span>
+      <div className="flex items-center gap-4">
+        <button 
+          onClick={onMenuToggle}
+          className="lg:hidden p-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white transition-all shadow-glow shadow-indigo-500/5"
+        >
+          <Zap size={20} />
+        </button>
+        <div className="flex flex-col gap-0 md:gap-1">
+          <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tighter truncate max-w-[150px] md:max-w-none">{title}</h2>
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full animate-pulse ${focusMode ? 'bg-indigo-500 shadow-[0_0_10px_#6366f1]' : 'bg-emerald-500 shadow-[0_0_10px_#10b981]'}`} />
+            <span className={`text-[10px] uppercase font-bold tracking-widest ${focusMode ? 'text-indigo-400' : 'text-emerald-400'}`}>
+              {focusMode ? "Focus Mode Active" : "Currently Monitoring"}
+            </span>
+          </div>
         </div>
       </div>
 

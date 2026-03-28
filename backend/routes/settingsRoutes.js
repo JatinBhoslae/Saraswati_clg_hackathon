@@ -25,5 +25,26 @@ module.exports = function (store) {
     res.json({ success: true, sites: store.getCustomSites() });
   });
 
+  // GET /api/keywords
+  router.get("/keywords", (req, res) => {
+    res.json({ keywords: store.getPriorityKeywords() });
+  });
+
+  // POST /api/keywords
+  router.post("/keywords", (req, res) => {
+    const { keyword } = req.body;
+    if (!keyword) return res.status(400).json({ error: "Keyword is required" });
+    store.addPriorityKeyword(keyword);
+    res.json({ success: true, keywords: store.getPriorityKeywords() });
+  });
+
+  // DELETE /api/keywords
+  router.delete("/keywords", (req, res) => {
+    const { keyword } = req.body;
+    if (!keyword) return res.status(400).json({ error: "Keyword is required" });
+    store.removePriorityKeyword(keyword);
+    res.json({ success: true, keywords: store.getPriorityKeywords() });
+  });
+
   return router;
 };

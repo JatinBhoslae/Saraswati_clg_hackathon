@@ -1,58 +1,66 @@
 const express = require('express');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
+const { NotificationRecord } = require('../models/db');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "dummy-key-for-now");
 
-// In-Memory Notification Queue (Unified Action Layer)
-let notifications = [];
+// Unified Action Layer (Dashboard Action Center)
 
-module.exports = (userContextRef) => {
+module.exports = (store) => {
   const router = express.Router();
 
   router.post('/route', async (req, res) => {
     try {
       const { platform, sender, content, metadata } = req.body;
+      let decision;
+      // Fallback/Hard-Heuristic Match (Seniors Spec Step 4)
+      const priorityList = store.getPriorityKeywords() || [];
+      const userContext = store.getFocusState();
       
-      // Construct prompt for Gemini
-      const prompt = `
-You are an intelligent Notification Router for a productivity assistant.
-Your goal is to decide whether an incoming notification should be delivered immediately,
-delayed (batched for later), or suppressed based on the user's real-time context.
+      const isUrgent = priorityList.some(kw => 
+        (content || "").toLowerCase().includes(kw.toLowerCase()) || 
+        (sender || "").toLowerCase().includes(kw.toLowerCase())
+      ) || ["mom", "dad", "urgent", "call", "asap", "meeting", "interview"].some(u => 
+        (content || "").toLowerCase().includes(u) || (sender || "").toLowerCase().includes(u)
+      );
 
-Current User Context:
-${JSON.stringify(userContextRef(), null, 2)}
+      const activeMode = store.getCurrentMode();
 
-Incoming Notification:
-Platform: ${platform}
-Sender: ${sender}
-Content: "${content}"
-
-Task:
-Analyze the user's context and the urgency/importance of the notification.
-Return ONLY a valid JSON object matching this schema:
-{
-  "decision": "deliver" | "delay" | "suppress",
-  "reason": "short explanation of why this decision was made",
-  "priority": 1-10 // 10 is highest urgency
-}
-`;
-
-      let decision = { decision: "deliver", reason: "Direct forward (AI analysis skipped)", priority: 5 };
-      try {
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
-        decision = JSON.parse(text);
-      } catch (aiError) {
-        console.error("⚠️ AI Router Fallback Triggered (Gemini Error):", aiError.message);
-        decision = { decision: "deliver", reason: "Fallback logic due to API processing error", priority: 5 };
+      if (isUrgent) {
+        decision = { decision: "deliver", reason: "Family priority or urgent keyword detected by engine", priority: 10 };
+      } else {
+        const prompt = `
+          You are an intelligent notification router. I am currently in ${activeMode}.
+          Identify if this notification is from a priority contact or vital for work.
+          
+          CRITICAL RULES:
+          1. If the content contains "reel", "post", or an instagram/tiktok link -> delay
+          2. If it's a "Promotion", "Newsletter", or "Junk" email -> suppress (delay)
+          3. If it's from Google Meet, Teams, Slack, or an 'Office' group -> deliver
+          4. If it's lunch break (${activeMode.includes('Lunch')}), deliver more casual content but still delay reels.
+          
+          Return JSON: { "decision": "deliver" | "delay" | "suppress", "reason": "reason", "priority": 1-10 }
+          
+          NOTIFICATION:
+          From: ${sender}
+          Platform: ${platform}
+          Content: ${content}
+        `;
+        try {
+          const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
+          const result = await model.generateContent(prompt);
+          const text = result.response.text();
+          decision = JSON.parse(text);
+        } catch (aiError) {
+          console.error("⚠️ AI Router Fallback Triggered (Gemini Error):", aiError.message);
+          decision = { decision: "deliver", reason: "Fallback logic due to AI service unavailability", priority: 5 };
+        }
       }
 
       console.log(`🧠 AI Notification Decision for [${platform} from ${sender}]: ${decision.decision}`);
       
-      const notificationRecord = {
-        id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+      const notification = await NotificationRecord.create({
         platform,
         sender,
         content,
@@ -60,15 +68,13 @@ Return ONLY a valid JSON object matching this schema:
         decision: decision.decision || "deliver",
         reason: decision.reason,
         priority: decision.priority || 5,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(),
         read: false
-      };
+      });
       
-      notifications.unshift(notificationRecord);
-
       res.json({
         success: true,
-        notification: notificationRecord
+        notification
       });
       
     } catch (error) {
@@ -78,34 +84,43 @@ Return ONLY a valid JSON object matching this schema:
   });
 
   // GET all notifications for the Action Center
-  router.get('/', (req, res) => {
-    res.json({ notifications });
+  router.get('/', async (req, res) => {
+    try {
+      const notifications = await NotificationRecord.find().sort({ timestamp: -1 }).limit(50).lean();
+      res.json({ notifications });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch notifications" });
+    }
   });
 
   // Mark notification as read
-  router.post('/:id/read', (req, res) => {
+  router.post('/:id/read', async (req, res) => {
     const { id } = req.params;
-    const notif = notifications.find(n => n.id === id);
-    if (notif) {
-      notif.read = true;
-      res.json({ success: true, notification: notif });
-    } else {
-      res.status(404).json({ error: "Notification not found" });
+    try {
+      const notification = await NotificationRecord.findByIdAndUpdate(id, { read: true }, { new: true });
+      if (notification) {
+        res.json({ success: true, notification });
+      } else {
+        res.status(404).json({ error: "Notification not found" });
+      }
+    } catch (err) {
+      res.status(500).json({ error: "Update failed" });
     }
   });
 
   // Perform quick action
-  router.post('/:id/action', (req, res) => {
+  router.post('/:id/action', async (req, res) => {
     const { id } = req.params;
     const { actionType, payload } = req.body; // e.g., 'reply', 'archive'
     
-    // In a real implementation this would call Gmail APIs / WhatsApp APIs
-    console.log(`⚙️ Executing [${actionType}] on Notification ${id} with payload:`, payload);
-    
-    // Remove or archive from the queue
-    notifications = notifications.filter(n => n.id !== id);
-    
-    res.json({ success: true, message: `Action ${actionType} executed` });
+    try {
+      console.log(`⚙️ Executing [${actionType}] on Notification ${id} with payload:`, payload);
+      // Remove or archive from the queue
+      await NotificationRecord.findByIdAndDelete(id);
+      res.json({ success: true, message: `Action ${actionType} executed` });
+    } catch (err) {
+      res.status(500).json({ error: "Action failed" });
+    }
   });
 
   return router;

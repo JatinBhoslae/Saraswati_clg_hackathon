@@ -9,7 +9,8 @@
   
   // State: whether focus mode is currently active
   let _focusModeActive = false;
-  let _muteList = []; // Array of chat names to mute
+  let _muteList = []; // Array of chat names to mute (friend's logic)
+  let _priorityKeywords = []; // Personas that bypass focus (my logic)
 
   function _logBlocked(title, options, source = "unknown") {
     window.dispatchEvent(
@@ -28,13 +29,28 @@
   const _OrigNotification = window.Notification;
   
   function _SilentNotification(title, options) {
-    // 1. Check Global Focus Mode
+    // 1. Check for PRIORITY BYPASS (My logic: Senior Spec Step 4)
+    const isPriority = _priorityKeywords.some(kw => 
+      title.toLowerCase().includes(kw.toLowerCase()) || 
+      (options && options.body && options.body.toLowerCase().includes(kw.toLowerCase()))
+    );
+
+    if (isPriority) {
+        console.log("💎 [Priority Mode] Delivering Whitelisted Persona:", title);
+        return new _OrigNotification(title, options);
+    }
+
+    // 2. Check Global Focus Mode
     if (_focusModeActive) {
       _logBlocked(title, options, "focus_mode");
       
       this.title = title;
       this.body = (options && options.body) || "";
       this.close = function() {};
+      this.onclick = null;
+      this.onshow = null;
+      this.onerror = null;
+      this.onclose = null;
       this.addEventListener = function() {};
       this.removeEventListener = function() {};
       return this;
@@ -67,6 +83,15 @@
   if (typeof ServiceWorkerRegistration !== "undefined" && ServiceWorkerRegistration.prototype) {
     const _origShow = ServiceWorkerRegistration.prototype.showNotification;
     ServiceWorkerRegistration.prototype.showNotification = function(title, options) {
+      const isPriority = _priorityKeywords.some(kw => 
+        title.toLowerCase().includes(kw.toLowerCase()) || 
+        (options && options.body && options.body.toLowerCase().includes(kw.toLowerCase()))
+      );
+
+      if (isPriority) {
+         return _origShow.call(this, title, options);
+      }
+
       if (_focusModeActive || _muteList.includes(title)) {
         _logBlocked(title, options, _focusModeActive ? "focus_mode" : "strict_mute");
         return Promise.resolve();
@@ -75,12 +100,15 @@
     };
   }
 
-  window.Notification = _SilentNotification;
+  window.Notification = _focusModeActive ? _SilentNotification : _OrigNotification;
 
   // === 3. Listen for updates from content script ===
   window.addEventListener("__pa_update__", function (e) {
     if (e.detail) {
-      if (typeof e.detail.on !== 'undefined') _focusModeActive = !!e.detail.on;
+      if (typeof e.detail.on !== 'undefined') {
+          _focusModeActive = !!e.detail.on;
+          window.Notification = _focusModeActive ? _SilentNotification : _OrigNotification;
+      }
       if (e.detail.mutedWhatsAppChats && Array.isArray(e.detail.mutedWhatsAppChats)) {
         _muteList = e.detail.mutedWhatsAppChats;
       }
@@ -92,6 +120,14 @@
   window.addEventListener("__pa_focus__", function (e) {
     if (e.detail) {
       _focusModeActive = !!e.detail.on;
+      window.Notification = _focusModeActive ? _SilentNotification : _OrigNotification;
+    }
+  });
+
+  window.addEventListener("__pa_keywords__", function(e) {
+    if (e.detail && e.detail.keywords) {
+      _priorityKeywords = e.detail.keywords;
+      console.log("💎 Priority Personas synced:", _priorityKeywords);
     }
   });
 })();

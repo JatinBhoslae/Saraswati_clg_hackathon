@@ -23,6 +23,7 @@ import ChartSection from "./components/ChartSection";
 import LogsTable from "./components/LogsTable";
 import NotificationPanel from "./components/NotificationPanel";
 import SettingsPanel from "./components/SettingsPanel";
+import CalendarControl from "./pages/SchedulePage";
 import ActionCenter from "./components/ActionCenter";
 import ManagePage from "./components/ManagePage";
 import WhatsAppManage from "./components/WhatsAppManage";
@@ -80,6 +81,7 @@ const API_URL = "http://localhost:5001/api";
 
 function App() {
   const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -108,16 +110,18 @@ function App() {
   const [summary, setSummary] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [customBlockedSites, setCustomBlockedSites] = useState([]);
+  const [priorityKeywords, setPriorityKeywords] = useState([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsRes, logsRes, summaryRes, suggRes, sitesRes] = await Promise.all([
+        const [statsRes, logsRes, summaryRes, suggRes, sitesRes, kwRes] = await Promise.all([
           axios.get(`${API_URL}/stats`),
           axios.get(`${API_URL}/logs?limit=25`),
           axios.get(`${API_URL}/summary`),
           axios.get(`${API_URL}/suggestions`),
-          axios.get(`${API_URL}/custom-sites`)
+          axios.get(`${API_URL}/custom-sites`),
+          axios.get(`${API_URL}/keywords`)
         ]);
 
         setStats(statsRes.data);
@@ -125,6 +129,7 @@ function App() {
         setSummary(summaryRes.data.summary);
         setSuggestions(suggRes.data.suggestions);
         setCustomBlockedSites(sitesRes.data.sites || []);
+        setPriorityKeywords(kwRes.data.keywords || []);
       } catch (err) {
         console.error("Error fetching data", err);
       } finally {
@@ -166,15 +171,19 @@ function App() {
   };
 
   return (
-    <div className="flex min-h-screen bg-background text-slate-200 selection:bg-indigo-500/30">
-      <Sidebar gamification={stats.gamification} />
+    <div className="flex min-h-screen bg-background text-slate-200 selection:bg-indigo-500/30 overflow-x-hidden">
+      <Sidebar gamification={stats.gamification} isOpen={sidebarOpen} setOpen={setSidebarOpen} />
       
-      <main className="flex-1 ml-64 flex flex-col min-h-screen relative isolate overflow-x-hidden">
+      <main className={`flex-1 flex flex-col min-h-screen relative isolate transition-all duration-300 ${sidebarOpen ? 'lg:ml-64 ml-0' : 'lg:ml-64 ml-0'}`}>
         {/* Background Gradients */}
         <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-indigo-600/5 blur-[120px] rounded-full -z-10 pointer-events-none" />
         <div className="fixed bottom-0 left-0 w-[400px] h-[400px] bg-purple-600/5 blur-[100px] rounded-full -z-10 pointer-events-none" />
 
-        <Header focusMode={stats.focusMode} onToggleFocus={toggleFocusMode} />
+        <Header 
+          focusMode={stats.focusMode} 
+          onToggleFocus={toggleFocusMode} 
+          onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
+        />
         
         <div className="p-8 pb-12 flex-1">
           <AnimatePresence mode="wait">
@@ -286,6 +295,12 @@ function App() {
                 </motion.div>
               } />
 
+              <Route path="/schedule" element={
+                <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit">
+                  <CalendarControl />
+                </motion.div>
+              } />
+
               <Route path="/action-center" element={
                 <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit">
                   <ActionCenter />
@@ -320,6 +335,15 @@ function App() {
                       const res = await axios.delete(`${API_URL}/custom-sites`, { data: { site } });
                       setCustomBlockedSites(res.data.sites);
                     }} 
+                    priorityKeywords={priorityKeywords}
+                    onAddKeyword={async (keyword) => {
+                      const res = await axios.post(`${API_URL}/keywords`, { keyword });
+                      setPriorityKeywords(res.data.keywords);
+                    }}
+                    onRemoveKeyword={async (keyword) => {
+                      const res = await axios.delete(`${API_URL}/keywords`, { data: { keyword } });
+                      setPriorityKeywords(res.data.keywords);
+                    }}
                   />
                 </motion.div>
               } />

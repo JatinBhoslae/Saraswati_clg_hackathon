@@ -14,10 +14,8 @@
 // -----------------------------------------------------------
 // 📋 CONFIGURATION
 // -----------------------------------------------------------
-let _focusState = false;
-let _blockedSites = [];
 let _mutedWhatsAppChats = []; // Local cache of names
-let _backendUrl = "http://localhost:5001/api";
+const BACKEND_URL = "http://localhost:5001/api";
 
 // Site classification rules (mirrors backend AI module)
 const SITE_RULES = {
@@ -94,7 +92,7 @@ function shouldBlock(type, focusMode) {
 // -----------------------------------------------------------
 async function sendLog(logData) {
   try {
-    await fetch(`${_backendUrl}/log`, {
+    await fetch(`${BACKEND_URL}/log`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(logData),
@@ -140,7 +138,7 @@ let sessionStats = {
 // -----------------------------------------------------------
 async function syncFocusState() {
   try {
-    const res = await fetch(`${_backendUrl}/focus`);
+    const res = await fetch(`${BACKEND_URL}/focus`);
     if (res.ok) {
       const { focusMode } = await res.json();
       const stored = await chrome.storage.local.get("focusMode");
@@ -152,7 +150,7 @@ async function syncFocusState() {
     }
     // 3. Sync Muted WhatsApp Chats
     try {
-        const muteRes = await fetch(`${_backendUrl}/whatsapp/muted`);
+        const muteRes = await fetch(`${BACKEND_URL}/whatsapp/muted`);
         const mutedNames = await muteRes.json();
         if (JSON.stringify(mutedNames) !== JSON.stringify(_mutedWhatsAppChats)) {
             _mutedWhatsAppChats = mutedNames;
@@ -174,27 +172,85 @@ async function syncFocusState() {
   }
 }
 
+// -----------------------------------------------------------
+// 📅 SCHEDULER ENGINE (Local Decision)
+// -----------------------------------------------------------
+async function checkScheduler() {
+  try {
+    const res = await fetch(`${BACKEND_URL}/schedule/status`);
+    if (!res.ok) return;
+
+    const data = await res.json();
+    const { activeMode, schedulerEnabled, manualOverride: backendOverride } = data;
+    
+    // Use the backend's manual override state
+    if (backendOverride) {
+      console.log("⏸️ Scheduler paused due to Backend Manual Override");
+      return;
+    }
+
+    if (!schedulerEnabled) return;
+
+    const shouldBeOn = activeMode.includes("Office Mode");
+
+    if (shouldBeOn && !localFocus) {
+      console.log("🤖 [Auto] Activating Office Mode based on schedule...");
+      applyFocusState(true);
+    } else if (!shouldBeOn && localFocus) {
+      console.log("🤖 [Auto] Deactivating Office Mode as schedule ended.");
+      applyFocusState(false);
+    }
+  } catch (e) {
+    console.warn("Scheduler check failed:", e.message);
+  }
+}
+
 // Helper to apply focus state to all browser components
 async function applyFocusState(newMode) {
   await chrome.storage.local.set({ focusMode: newMode });
 
-  // 1. Mute notifications (We rely on content script interception for tracking, 
-  // so we CLEAR native blocks to allow scripts to catch the events)
+  // 0. Fetch latest priority keywords to broadcast
+  let priorityKeywords = [];
+  try {
+    const res = await fetch(`${BACKEND_URL}/keywords`);
+    const data = await res.json();
+    priorityKeywords = data.keywords || [];
+  } catch(e) {}
+
+  // 1. Manage Notifications (Native Level)
   if (chrome.contentSettings && chrome.contentSettings.notifications) {
-    chrome.contentSettings.notifications.clear({});
+    if (newMode) {
+      // 🎯 FORCE BLOCK distracting platforms at the browser level
+      // ... (custom sites fetch logic)
+      chrome.contentSettings.notifications.set({
+        primaryPattern: "<all_urls>",
+        setting: "block"
+      });
+      console.log("🔒 Site-specific native blocks applied for Focus Mode");
+    } else {
+      // Restore defaults — Tell Chrome to let the user decide again
+      chrome.contentSettings.notifications.set({
+        primaryPattern: "<all_urls>",
+        setting: "allow" 
+      });
+      // Also clear to ensure no cached extension-locks remain in the Chrome UI
+      chrome.contentSettings.notifications.clear({});
+      console.log("🔓 Focus Mode OFF: Native notification guard released.");
+    }
   }
 
   // 2. Broadcast to all tabs & Mute/Unmute
   chrome.tabs.query({}, (tabs) => {
     tabs.forEach((tab) => {
       if (tab.id && !tab.url?.startsWith("chrome://")) {
-        // Mute tab to block sounds
+        // Mute tab to block notification sounds (like Whatsapp ding)
         chrome.tabs.update(tab.id, { muted: newMode }).catch(() => {});
         
-        // Notify content scripts
+        // Notify content scripts to enable/update JS-level interception
         chrome.tabs.sendMessage(tab.id, {
-          type: "FOCUS_MODE_CHANGED",
+          type: "EXTENSION_STATE_CHANGED",
           focusMode: newMode,
+          priorityKeywords: priorityKeywords
         }).catch(() => {});
       }
     });
@@ -225,43 +281,39 @@ setInterval(() => {
 // -----------------------------------------------------------
 setInterval(async () => {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/focus`);
-    if (res.ok) {
-      const data = await res.json();
-      const backendFocusMode = data.focusMode;
+    const focusRes = await fetch(`${BACKEND_URL}/focus`);
+    const siteRes = await fetch(`${BACKEND_URL}/custom-sites`);
+    const kwRes = await fetch(`${BACKEND_URL}/keywords`);
+    
+    if (focusRes.ok && siteRes.ok && kwRes.ok) {
+      const { focusMode: backendFocusMode } = await focusRes.json();
+      const { sites: backendSites = [] } = await siteRes.json();
+      const { keywords: backendKeywords = [] } = await kwRes.json();
       
-      chrome.storage.local.get("focusMode", (localData) => {
-        if (localData.focusMode !== backendFocusMode) {
-          // Dashboard changed the state -> Update Extension State
-          chrome.storage.local.set({ focusMode: backendFocusMode }, () => {
-            // (We purposely do NOT block chrome.contentSettings.notifications natively anymore. 
-            // We want the web apps to receive the notification so our JS page-script interception 
-            // logic can capture the payload and log it towards the Dashboard Analytics!)
-            
-            // Sync all active tabs (muting + content script signals)
-            chrome.tabs.query({}, (tabs) => {
-              tabs.forEach((tab) => {
-                if (tab.id && !tab.url?.startsWith("chrome://")) {
-                  try {
-                    chrome.tabs.update(tab.id, { muted: backendFocusMode }).catch(() => {});
-                  } catch (e) {}
-                  
-                  chrome.tabs.sendMessage(tab.id, {
-                    type: "FOCUS_MODE_CHANGED",
-                    focusMode: backendFocusMode,
-                  }).catch(() => {});
-                }
-              });
-            });
-            console.log(`🔄 Focus State Synced from Dashboard: ${backendFocusMode}`);
-          });
-        }
-      });
+      const { 
+        focusMode: localFocusMode, 
+        siteCount = 0, 
+        kwCount = 0 
+      } = await chrome.storage.local.get(["focusMode", "siteCount", "kwCount"]);
+      
+      // Re-apply if toggle changed OR if sites list changed OR if keywords list changed
+      if (
+        localFocusMode !== backendFocusMode || 
+        siteCount !== backendSites.length || 
+        kwCount !== backendKeywords.length
+      ) {
+        console.log(`🔄 Sync Triggered (Total Change Detection)`);
+        await chrome.storage.local.set({ 
+          siteCount: backendSites.length,
+          kwCount: backendKeywords.length 
+        });
+        await applyFocusState(backendFocusMode);
+      }
     }
   } catch (e) {
-    // Backend purely offline
+    // Backend offline
   }
-}, 2000);
+}, 2500);
 
 // -----------------------------------------------------------
 // 🧠 GENERATE SESSION SUMMARY
@@ -301,13 +353,21 @@ async function handleTabChange(tabId, url) {
     return;
   }
 
-  // 1. Fetch custom sites from our persistent backend store
+  // 1. Fetch custom sites and priority keywords from our persistent backend store
   let customSites = [];
+  let priorityKeywords = [];
   try {
-    const res = await fetch(`${_backendUrl}/custom-sites`);
-    if (res.ok) {
-      const data = await res.json();
+    const [sitesRes, kwRes] = await Promise.all([
+      fetch(`${BACKEND_URL}/custom-sites`),
+      fetch(`${BACKEND_URL}/keywords`)
+    ]);
+    if (sitesRes.ok) {
+      const data = await sitesRes.json();
       customSites = data.sites || [];
+    }
+    if (kwRes.ok) {
+      const data = await kwRes.json();
+      priorityKeywords = data.keywords || [];
     }
   } catch (e) {
     // Backend offline, fallback gracefully
@@ -327,7 +387,13 @@ async function handleTabChange(tabId, url) {
       return hostname.includes(cleanSite) || cleanSite.includes(hostname);
     });
 
-    if (isCustomBlocked) {
+    // Strategy Change: If common distracting hostname but contains priority metadata
+    // (e.g. WhatsApp with a priority contact name), we treat as Productive
+    const hasPriorityKW = priorityKeywords.some(kw => url.toLowerCase().includes(kw.toLowerCase()));
+
+    if (hasPriorityKW) {
+      type = "productive";
+    } else if (isCustomBlocked) {
       type = "distraction";
     }
   } catch (e) {}
@@ -341,6 +407,7 @@ async function handleTabChange(tabId, url) {
   else sessionStats.neutral++;
 
   // 4. Decision: should we block?
+  // [SITE BLOCKING RESTORED & ENHANCED WITH PRIORITY BYPASS]
   if (shouldBlock(type, focusMode)) {
     // Block by redirecting to blocked page
     const blockedPageUrl =
@@ -407,12 +474,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Extension state (focus + keywords)
+  if (message.type === "GET_EXTENSION_STATE") {
+    (async () => {
+      const { focusMode = false } = await chrome.storage.local.get("focusMode");
+      try {
+        const kwRes = await fetch(`${BACKEND_URL}/keywords`);
+        const { keywords = [] } = kwRes.ok ? await kwRes.json() : {};
+        sendResponse({ focusMode, priorityKeywords: keywords });
+      } catch (e) {
+        sendResponse({ focusMode, priorityKeywords: [] });
+      }
+    })();
+    return true; // Keep message channel open for async response
+  }
+
   // Focus mode queries
   if (message.type === "GET_FOCUS_MODE") {
     chrome.storage.local.get("focusMode", (data) => {
       sendResponse({ focusMode: data.focusMode || false });
     });
-    return true; // Keep message channel open for async response
+    return true; 
   }
 
   // Focus mode toggle
@@ -421,7 +503,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const newMode = !data.focusMode;
       
       // Update store and backend
-      fetch(`${_backendUrl}/focus`, {
+      fetch(`${BACKEND_URL}/focus`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ focusMode: newMode }),
@@ -458,7 +540,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
 
     // Also heavily forward this to the new Unified Action Center AI Router!
-    fetch(`${BACKEND_URL}/api/notifications/route`, {
+    fetch(`${BACKEND_URL}/notifications/route`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -490,7 +572,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // === PLATFORM DATA HANDLERS ===
   if (message.type === "UPDATE_WHATSAPP_CHATS") {
-    fetch(`${_backendUrl}/platforms/whatsapp/chats`, {
+    fetch(`${BACKEND_URL}/whatsapp/chats`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chats: message.chats }),
@@ -499,7 +581,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "UPDATE_GMAIL_EMAILS") {
-    fetch(`${_backendUrl}/platforms/gmail/emails`, {
+    fetch(`${BACKEND_URL}/gmail/emails`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ emails: message.emails }),
@@ -520,13 +602,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ status: "forwarded" });
     return true;
   }
+
+  // Handle live content scans for priority keywords
+  if (message.type === "SCAN_CONTENT_MATCH") {
+    chrome.storage.local.get("focusMode", (data) => {
+      if (!data.focusMode) return;
+      
+      // Perform a silent fetch of keywords to check match
+      fetch(`${BACKEND_URL}/keywords`)
+        .then(res => res.json())
+        .then(kwData => {
+          const keywords = kwData.keywords || [];
+          const found = keywords.some(kw => message.text.toLowerCase().includes(kw.toLowerCase()));
+          
+           if (found) {
+             console.log("💎 Priority keyword detected in page content! Ensuring unblocked state...");
+           }
+        }).catch(() => {});
+    });
+    return false;
+  }
 });
 
 // Initialize on install
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({ focusMode: false });
+  chrome.storage.local.set({ focusMode: false, manualOverride: false });
+
+  // ⏰ Create scheduler alarm (every minute)
+  chrome.alarms.create("checkScheduler", { periodInMinutes: 1 });
+
   if (chrome.contentSettings && chrome.contentSettings.notifications) {
     chrome.contentSettings.notifications.clear({});
   }
   console.log("✅ Context-Aware Productivity Assistant v2.0 installed!");
+});
+
+// Listen for alarms
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "checkScheduler") {
+    checkScheduler();
+  }
 });

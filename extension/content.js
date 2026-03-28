@@ -141,16 +141,30 @@
     } catch (e) {}
   }
 
+  function broadcastKeywords(keywords) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent("__pa_keywords__", { detail: { keywords } })
+      );
+    } catch (e) {}
+  }
 
   // -----------------------------------------------------------
-  // 🔄 GET INITIAL FOCUS STATE
+  // 🔄 GET INITIAL EXTENSION STATE
   // -----------------------------------------------------------
-  // 🔄 GET INITIAL SYNC DATA
+   // 🔄 GET INITIAL SYNC DATA
   safeSendMessage({ type: "GET_SYNC_DATA" }, function (response) {
     if (response) {
       focusModeActive = response.focusMode || false;
       mutedWhatsAppChats = response.mutedWhatsAppChats || [];
       broadcastUpdates(focusModeActive, response.blockedSites, mutedWhatsAppChats);
+      
+      // Also get keywords for the smart filter
+      safeSendMessage({ type: "GET_EXTENSION_STATE" }, function (extResponse) {
+        if (extResponse && extResponse.priorityKeywords) {
+          broadcastKeywords(extResponse.priorityKeywords);
+        }
+      });
     }
   });
 
@@ -171,9 +185,12 @@
           cleanup();
           return;
         }
-        if (message.type === "FOCUS_MODE_CHANGED") {
+        if (message.type === "FOCUS_MODE_CHANGED" || message.type === "EXTENSION_STATE_CHANGED") {
           focusModeActive = message.focusMode;
-          broadcastUpdates(focusModeActive, message.blockedSites, message.mutedWhatsAppChats);
+          broadcastUpdates(focusModeActive, message.blockedSites || [], message.mutedWhatsAppChats || []);
+          if (message.priorityKeywords) {
+            broadcastKeywords(message.priorityKeywords);
+          }
         } else if (message.type === "MUTE_LIST_UPDATE") {
           mutedWhatsAppChats = message.mutedNames;
           broadcastUpdates(focusModeActive, [], mutedWhatsAppChats);
@@ -467,11 +484,45 @@
     }
   }
 
-  // Run scrapers every 10 seconds
+  // 👁️ LIVE MUTATION OBSERVER (Instant Dashboard Sync)
+  const chatListObserver = new MutationObserver(() => {
+    // Throttled scrape to avoid performance hits on rapid typing
+    if (this._scrapeTimeout) clearTimeout(this._scrapeTimeout);
+    this._scrapeTimeout = setTimeout(scrapeWhatsApp, 500);
+  });
+
+  function startChatObserver() {
+    const list = document.querySelector("div[aria-label='Chat list']");
+    if (list) {
+      console.log("👁️ [Observer] Chat list found, starting instant sync...");
+      chatListObserver.observe(list, { childList: true, subtree: true, characterData: true });
+    } else {
+      // Retry in 5s if not loaded yet
+      setTimeout(startChatObserver, 5000);
+    }
+  }
+
+  // Run scrapers logic
   registerInterval(() => {
-    scrapeWhatsApp();
     scrapeGmail();
+    // WhatsApp is now handled by observer for "new messages", 
+    // but we still poll occasionally to refresh unread counts/visuals
+    scrapeWhatsApp(); 
   }, 10000);
+
+  startChatObserver();
+
+  // 🧠 CONTENT INTELLIGENCE (Senior Spec: Step 2)
+  function scanPageForKeywords() {
+    if (!focusModeActive || !contextAlive) return;
+    const bodyText = document.body.innerText || "";
+    safeSendMessage({ 
+      type: "SCAN_CONTENT_MATCH", 
+      text: bodyText.substring(0, 2000),
+      url: window.location.href 
+    });
+  }
+  registerInterval(scanPageForKeywords, 30000);
 
   const titleNode = document.querySelector("title");
   if (titleNode) {

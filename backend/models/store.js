@@ -6,7 +6,17 @@
 // In production, replace with MongoDB/PostgreSQL.
 // ============================================================
 
-const { ActivityLog, CustomSite } = require("./db");
+const { 
+  ActivityLog, 
+  CustomSite, 
+  PriorityKeyword, 
+  UserSettings, 
+  NotificationRecord,
+  Schedule,
+  GoogleAuth,
+  WhatsAppChat,
+  GmailEmail
+} = require("./db");
 
 const MAX_LOGS = 1000; // Prevent memory overflow
  
@@ -20,15 +30,23 @@ const MAX_LOGS = 1000; // Prevent memory overflow
  // -----------------------------------------------------------
  let focusMode = false;
  let focusModeStartTime = null;
- let totalFocusTimeMs = 0;
- let activePresetId = null;
+let totalFocusTimeMs = 0;
+let manualOverride = false;
+let activePresetId = null;
  let mutedApps = [];
  let mutedUsersByPreset = {};  // shape: { work: { whatsapp: ["Rahul"], gmail: ["boss@work.com"] }, home: {} }
 
 // -----------------------------------------------------------
-// 🛑 Custom Blocked Sites
+// 🛑 Custom Blocked Sites & Keywords
 // -----------------------------------------------------------
 let customBlockedSites = [];
+let priorityKeywords = [];
+
+// 📅 Scheduler & Calendar State
+let schedules = [];
+let schedulerEnabled = true;
+let todayCalendarEvents = [];
+let calendarLastUpdated = null;
 
 // Initialization - Load from DB
 async function initStore() {
@@ -45,7 +63,38 @@ async function initStore() {
     } else {
       customBlockedSites = sites.map((s) => s.site);
     }
-    console.log("✅ Store synced successfully with MongoDB");
+
+    const kw = await PriorityKeyword.find().lean();
+    priorityKeywords = kw.map((k) => k.keyword);
+
+    // Sync Gamification & Focus Mode
+    let settings = await UserSettings.findOne().lean();
+    if (!settings) {
+      settings = await UserSettings.create({ focusMode: false, xp: 0, level: 1 });
+    }
+    
+    focusMode = settings.focusMode || false;
+    xp = settings.xp || 0;
+    level = settings.level || 1;
+    dailyStreak = settings.dailyStreak || 0;
+    lastActiveDate = settings.lastActiveDate || null;
+    totalFocusTimeMs = settings.totalFocusTimeMs || 0;
+    manualOverride = settings.manualOverride || false;
+    achievements = settings.achievements || [];
+
+    const sch = await Schedule.find().lean();
+    schedules = sch;
+
+    const wa = await WhatsAppChat.find().sort({ lastSynced: -1 }).limit(50).lean();
+    whatsappChats = wa;
+
+    const gm = await GmailEmail.find().sort({ lastSynced: -1 }).limit(50).lean();
+    gmailEmails = gm.map(e => ({
+      ...e,
+      time: e.time || new Date(e.lastSynced).toLocaleTimeString()
+    }));
+
+    console.log("✅ Store synced successfully with MongoDB (WA/GM persistent)");
   } catch (err) {
     console.error("🔴 Failed to sync store from MongoDB", err);
   }
@@ -79,6 +128,40 @@ const ACHIEVEMENT_LIST = [
   { id: "streak_7", title: "Weekly Warrior", desc: "7-day focus streak", icon: "🔥" },
 ];
 
+/** Helper: Time string "HH:MM" to total minutes */
+function timeToMinutes(timeStr) {
+  if (!timeStr) return 0;
+  const [h, m] = timeStr.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/** Helper: Check if current time is within HH:MM range */
+function isWithinTimeRange(start, end) {
+  const now = new Date();
+  const currentMins = now.getHours() * 60 + now.getMinutes();
+  const startMins = timeToMinutes(start);
+  const endMins = timeToMinutes(end);
+  return currentMins >= startMins && currentMins <= endMins;
+}
+
+/** Helper: Check if current day is in valid list (Mon-Sun) */
+function isValidDay(days) {
+  if (!days || days.length === 0) return true;
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const currentDay = dayNames[new Date().getDay()];
+  return days.includes(currentDay);
+}
+
+/** Helper: Check for holidays in list of event strings */
+function isHoliday(events) {
+  if (!events || !Array.isArray(events)) return false;
+  const keywords = ["holiday", "leave", "vacation", "off", "out of office", "ooo"];
+  return events.some(e => {
+    const text = e.toLowerCase();
+    return keywords.some(kw => text.includes(kw));
+  });
+}
+
 /** Calculate Level based on XP (standard RPG curve) */
 function calculateLevel(currentXp) {
   return Math.floor(Math.sqrt(currentXp / 100)) + 1;
@@ -92,7 +175,8 @@ const store = {
 
   /** Add a log entry to the store and award XP */
   addLog(logEntry) {
-    const fullLog = { ...logEntry, timestamp: new Date() };
+    const today = new Date().toISOString().split('T')[0];
+    const fullLog = { ...logEntry, timestamp: new Date(), date: today };
     activityLogs.push(fullLog);
     
     // Award XP based on productivity
@@ -128,16 +212,17 @@ const store = {
         dailyStreak = 1;
       }
       lastActiveDate = today;
+      UserSettings.findOneAndUpdate({}, { dailyStreak, lastActiveDate }, { upsert: true }).catch(() => {});
     }
   },
 
-  addXP(amount) {
+  async addXP(amount) {
     xp += amount;
     const newLevel = calculateLevel(xp);
     if (newLevel > level) {
       level = newLevel;
-      // You could trigger a notification here if we had sockets
     }
+    UserSettings.findOneAndUpdate({}, { xp, level }, { upsert: true }).catch(() => {});
   },
 
   /** Get all logs (returns reference — treat as read-only) */
@@ -166,6 +251,14 @@ const store = {
   // === PLATFORM OPERATIONS ===
   setWhatsAppChats(chats) {
     whatsappChats = chats;
+    // Persist to DB asynchronously
+    chats.forEach(chat => {
+      WhatsAppChat.findOneAndUpdate(
+        { name: chat.name },
+        { ...chat, lastSynced: new Date() },
+        { upsert: true, new: true }
+      ).catch(e => console.error("WA Persist failed", e));
+    });
   },
   getWhatsAppChats() {
     return whatsappChats;
@@ -184,6 +277,16 @@ const store = {
 
   setGmailEmails(emails) {
     gmailEmails = emails;
+    // Persist to DB
+    emails.forEach(email => {
+      // Create a unique internal ID if none provided
+      const id = email.id || `${email.subject}-${email.sender}-${email.time}`; 
+      GmailEmail.findOneAndUpdate(
+        { id },
+        { ...email, lastSynced: new Date() },
+        { upsert: true, new: true }
+      ).catch(e => console.error("GM Persist failed", e));
+    });
   },
   getGmailEmails() {
     return gmailEmails;
@@ -211,7 +314,12 @@ const store = {
       this.addXP(Math.floor(sessionMs / 60000));
       focusModeStartTime = null;
     }
+    
     focusMode = newMode;
+    UserSettings.findOneAndUpdate({}, { 
+      focusMode, 
+      totalFocusTimeMs 
+    }, { upsert: true }).catch(() => {});
   },
 
   getFocusState() {
@@ -249,11 +357,32 @@ const store = {
     focusModeStartTime = null;
     totalFocusTimeMs = 0;
     customBlockedSites = [];
+    priorityKeywords = [];
     activePresetId = null;
     mutedApps = [];
     mutedUsersByPreset = {};
     ActivityLog.deleteMany({}).catch(() => {});
     CustomSite.deleteMany({}).catch(() => {});
+    PriorityKeyword.deleteMany({}).catch(() => {});
+    UserSettings.deleteMany({}).catch(() => {});
+    NotificationRecord.deleteMany({}).catch(() => {});
+  },
+
+  // === KEYWORD OPERATIONS (Context-Aware Engine) ===
+  getPriorityKeywords() {
+    return priorityKeywords;
+  },
+
+  addPriorityKeyword(keyword) {
+    if (!priorityKeywords.includes(keyword)) {
+      priorityKeywords.push(keyword);
+      PriorityKeyword.create({ keyword }).catch(err => console.error("DB Error saving keyword:", err));
+    }
+  },
+
+  removePriorityKeyword(keyword) {
+    priorityKeywords = priorityKeywords.filter((k) => k !== keyword);
+    PriorityKeyword.deleteOne({ keyword }).catch(() => {});
   },
 
   // === PRESETS & MUTED USERS (Friend's Additions) ===
@@ -275,9 +404,88 @@ const store = {
   },
   removeMutedUser(presetId, app, identifier) {
     if (mutedUsersByPreset[presetId]?.[app]) {
-      mutedUsersByPreset[presetId][app] = mutedUsersByPreset[presetId][app].filter(u => u !== identifier);
+       mutedUsersByPreset[presetId][app] = mutedUsersByPreset[presetId][app].filter(u => u !== identifier);
     }
   },
+
+  // === SCHEDULER OPERATIONS ===
+  getSchedules() { return schedules; },
+  async addSchedule(sch) {
+    const s = await Schedule.create(sch);
+    schedules.push(s);
+    return s;
+  },
+  async removeSchedule(id) {
+    await Schedule.findByIdAndDelete(id);
+    schedules = schedules.filter(s => s._id.toString() !== id);
+  },
+  async updateSchedule(id, updates) {
+    const s = await Schedule.findByIdAndUpdate(id, updates, { new: true });
+    schedules = schedules.map(old => old._id.toString() === id ? s : old);
+    return s;
+  },
+  setSchedulerEnabled(on) { schedulerEnabled = on; },
+  getSchedulerEnabled() { return schedulerEnabled; },
+  setManualOverride(on) { 
+    manualOverride = on; 
+    UserSettings.findOneAndUpdate({}, { manualOverride }, { upsert: true }).catch(() => {});
+  },
+  getManualOverride() { return manualOverride; },
+  clearManualOverride() {
+    manualOverride = false;
+    UserSettings.findOneAndUpdate({}, { manualOverride }, { upsert: true }).catch(() => {});
+  },
+  setCalendarEvents(events) { 
+    todayCalendarEvents = events; 
+    calendarLastUpdated = new Date();
+  },
+  getCalendarEvents() { return todayCalendarEvents; },
+
+  /** Final Decision Logic for Mode Switching */
+  getCurrentMode() {
+    // 1. Manual Override Check (Rule 1: Highest Priority)
+    if (manualOverride) return focusMode ? "Office Mode (Manual)" : "Normal (Manual Override)";
+
+    // 2. Holiday / Lunch Check (Calendar Events with Time-awareness)
+    const now = new Date();
+    const isSpecialTime = todayCalendarEvents.find(e => {
+      const startTime = new Date(e.start);
+      const endTime = new Date(e.end);
+      return now >= startTime && now <= endTime;
+    });
+
+    if (isSpecialTime) {
+      if (isSpecialTime.type === "holiday") return "Normal (Holiday)";
+      if (isSpecialTime.type === "lunch") return "Normal (Lunch Break)";
+      if (isSpecialTime.type === "work") return "Office Mode (Sync)";
+    }
+
+    // 2b. Check Internal Lunch Range (Within fixed schedules)
+    const currentMins = now.getHours() * 60 + now.getMinutes();
+    for (const s of schedules) {
+        if (!s.isActive) continue;
+        if (!isValidDay(s.days)) continue;
+        
+        const lStart = timeToMinutes(s.lunchStartTime);
+        const lEnd = timeToMinutes(s.lunchEndTime);
+        
+        if (s.lunchStartTime && s.lunchEndTime && currentMins >= lStart && currentMins <= lEnd) {
+            return "Normal (Lunch Break)";
+        }
+    }
+
+    // 3. Fallback to Scheduler Check
+    if (!schedulerEnabled) return "Normal (Disabled)";
+
+    for (const s of schedules) {
+        if (!s.isActive) continue;
+        if (isValidDay(s.days) && isWithinTimeRange(s.startTime, s.endTime)) {
+            return "Office Mode (Auto)";
+        }
+    }
+
+    return "Normal Mode";
+  }
 };
 
 module.exports = store;

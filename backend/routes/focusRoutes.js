@@ -13,16 +13,21 @@ module.exports = function (store) {
   // ---------------------------------------------------------
   router.post("/focus", (req, res) => {
     const newMode = req.body.focusMode;
+    const isManual = req.body.manual !== false; // Default to manual if not specified
 
     if (typeof newMode !== "boolean") {
       return res.status(400).json({ error: "focusMode must be a boolean" });
     }
 
+    if (isManual) {
+      store.setManualOverride(true);
+    }
+
     store.setFocusMode(newMode);
     const state = store.getFocusState();
 
-    console.log(`🎯 Focus Mode: ${state.focusMode ? "ON 🔴" : "OFF ⚪"}`);
-    res.json({ focusMode: state.focusMode });
+    console.log(`🎯 Focus Mode: ${state.focusMode ? "ON 🔴" : "OFF ⚪"} (Manual: ${isManual})`);
+    res.json({ focusMode: state.focusMode, manualOverride: isManual });
   });
 
   // ---------------------------------------------------------
