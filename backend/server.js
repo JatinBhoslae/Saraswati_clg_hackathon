@@ -21,20 +21,20 @@ const settingsRoutes = require("./routes/settingsRoutes");
 const platformRoutes = require("./routes/platformRoutes");
 const gmailRoutes = require("./routes/gmailRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
-
+const presetRoutes = require("./routes/presetRoutes");
 const app = express();
 const PORT = process.env.PORT || 5001;
-
+ 
 // -----------------------------------------------------------
 // 🔧 MIDDLEWARE
 // -----------------------------------------------------------
 app.use(cors()); // Allow cross-origin requests from extension & dashboard
 app.use(express.json()); // Parse JSON request bodies
-
+ 
 // -----------------------------------------------------------
 // 📤 API ROUTES (modular)
 // -----------------------------------------------------------
-
+ 
 // Health check endpoint
 app.get("/", (req, res) => {
   res.json({
@@ -51,10 +51,13 @@ app.get("/", (req, res) => {
       "GET /api/custom-sites": "Get custom blocked sites",
       "POST /api/custom-sites": "Add custom blocked site",
       "DELETE /api/custom-sites": "Remove custom blocked site",
+      "GET /api/presets/active": "Get currently active preset",
+      "POST /api/presets/activate": "Activate a preset by id",
+      "POST /api/presets/deactivate": "Deactivate current preset",
     },
   });
 });
-
+ 
 // Mount modular routes
 app.use("/api", logRoutes(store));
 app.use("/api", statsRoutes(store));
@@ -62,7 +65,8 @@ app.use("/api", focusRoutes(store));
 app.use("/api", settingsRoutes(store));
 app.use("/api", platformRoutes(store));
 app.use("/api/gmail", gmailRoutes(store));
-app.use("/api/notifications", notificationRoutes(() => store.getFocusState()));
+app.use("/api/notifications", notificationRoutes(store));
+app.use("/api/presets", presetRoutes(store));
 
 // -----------------------------------------------------------
 // ❌ 404 Handler

@@ -14,7 +14,10 @@
 // -----------------------------------------------------------
 // 📋 CONFIGURATION
 // -----------------------------------------------------------
-const BACKEND_URL = "http://localhost:5001";
+let _focusState = false;
+let _blockedSites = [];
+let _mutedWhatsAppChats = []; // Local cache of names
+let _backendUrl = "http://localhost:5001/api";
 
 // Site classification rules (mirrors backend AI module)
 const SITE_RULES = {
@@ -91,7 +94,7 @@ function shouldBlock(type, focusMode) {
 // -----------------------------------------------------------
 async function sendLog(logData) {
   try {
-    await fetch(`${BACKEND_URL}/api/log`, {
+    await fetch(`${_backendUrl}/log`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(logData),
@@ -137,7 +140,7 @@ let sessionStats = {
 // -----------------------------------------------------------
 async function syncFocusState() {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/focus`);
+    const res = await fetch(`${_backendUrl}/focus`);
     if (res.ok) {
       const { focusMode } = await res.json();
       const stored = await chrome.storage.local.get("focusMode");
@@ -146,6 +149,25 @@ async function syncFocusState() {
         console.log(`🔄 Syncing Focus Mode from Backend: ${focusMode ? "ON" : "OFF"}`);
         applyFocusState(focusMode);
       }
+    }
+    // 3. Sync Muted WhatsApp Chats
+    try {
+        const muteRes = await fetch(`${_backendUrl}/whatsapp/muted`);
+        const mutedNames = await muteRes.json();
+        if (JSON.stringify(mutedNames) !== JSON.stringify(_mutedWhatsAppChats)) {
+            _mutedWhatsAppChats = mutedNames;
+            // Broadcast to all WhatsApp tabs
+            chrome.tabs.query({ url: "*://web.whatsapp.com/*" }, (tabs) => {
+                tabs.forEach(tab => {
+                    chrome.tabs.sendMessage(tab.id, { 
+                        type: "MUTE_LIST_UPDATE", 
+                        mutedNames: _mutedWhatsAppChats 
+                    });
+                });
+            });
+        }
+    } catch (e) {
+        console.error("Mute sync failed", e);
     }
   } catch (e) {
     // console.warn("Focus sync failed");
@@ -282,7 +304,7 @@ async function handleTabChange(tabId, url) {
   // 1. Fetch custom sites from our persistent backend store
   let customSites = [];
   try {
-    const res = await fetch(`${BACKEND_URL}/api/custom-sites`);
+    const res = await fetch(`${_backendUrl}/custom-sites`);
     if (res.ok) {
       const data = await res.json();
       customSites = data.sites || [];
@@ -376,6 +398,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 // Listen for messages from popup & content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "GET_SYNC_DATA") {
+    sendResponse({ 
+      focusMode: _focusState, 
+      blockedSites: _blockedSites,
+      mutedWhatsAppChats: _mutedWhatsAppChats
+    });
+    return true;
+  }
+
   // Focus mode queries
   if (message.type === "GET_FOCUS_MODE") {
     chrome.storage.local.get("focusMode", (data) => {
@@ -390,7 +421,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const newMode = !data.focusMode;
       
       // Update store and backend
-      fetch(`${BACKEND_URL}/api/focus`, {
+      fetch(`${_backendUrl}/focus`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ focusMode: newMode }),
@@ -459,7 +490,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // === PLATFORM DATA HANDLERS ===
   if (message.type === "UPDATE_WHATSAPP_CHATS") {
-    fetch(`${BACKEND_URL}/api/whatsapp/chats`, {
+    fetch(`${_backendUrl}/platforms/whatsapp/chats`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chats: message.chats }),
@@ -468,12 +499,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "UPDATE_GMAIL_EMAILS") {
-    fetch(`${BACKEND_URL}/api/gmail/emails`, {
+    fetch(`${_backendUrl}/platforms/gmail/emails`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ emails: message.emails }),
     }).catch(() => {});
     return false;
+  }
+
+  // Remote Automation: Trigger mute sequence in the WhatsApp tab
+  if (message.type === "AUTOMATE_WA_MUTE") {
+    chrome.tabs.query({ url: "*://web.whatsapp.com/*" }, (tabs) => {
+        tabs.forEach(tab => {
+            chrome.tabs.sendMessage(tab.id, { 
+                type: "TRIGGER_WA_MUTE_DOM", 
+                name: message.name 
+            });
+        });
+    });
+    sendResponse({ status: "forwarded" });
+    return true;
   }
 });
 

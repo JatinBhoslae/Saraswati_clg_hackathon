@@ -31,6 +31,9 @@ import GmailManage from "./components/GmailManage";
 import OutlookManage from "./components/OutlookManage";
 import ScoreRing from "./components/ScoreRing";
 import GlassCard from "./components/GlassCard";
+import PresetsPage from "./components/PresetsPage";
+import PresetDetailPage from "./components/PresetDetailPage";
+import WhatsAppBridge from "./components/WhatsAppBridge";
 
 // Premium Sound Engine
 const playSound = (type) => {
@@ -228,7 +231,10 @@ function App() {
                   </div>
 
                   <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
-                    <div className="xl:col-span-1"><NotificationPanel blockedNotifications={stats.blocked} /></div>
+                    <div className="xl:col-span-1 space-y-8">
+                      <NotificationPanel blockedNotifications={stats.blocked} />
+                      <WhatsAppBridge />
+                    </div>
                     <div className="xl:col-span-3"><LogsTable logs={logs} /></div>
                   </div>
                 </motion.div>
@@ -283,6 +289,17 @@ function App() {
               <Route path="/action-center" element={
                 <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit">
                   <ActionCenter />
+                </motion.div>
+              } />
+
+              <Route path="/presets" element={
+                <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit">
+                  <PresetsPage />
+                </motion.div>
+              } />
+              <Route path="/presets/:presetId" element={
+                <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit">
+                  <PresetDetailPage />
                 </motion.div>
               } />
               

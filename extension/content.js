@@ -12,7 +12,9 @@
   }
 
   let focusModeActive = false;
+  let mutedWhatsAppChats = []; // Local cache
   let contextAlive = true;
+
 
   // -----------------------------------------------------------
   // 🛡️ SAFE CHROME API WRAPPER
@@ -112,26 +114,51 @@
     });
   });
 
+  // 🔔 NEW: Listen for automation requests from Dashboard UI
+  window.addEventListener("__pa_automate_mute__", function(e) {
+    if (!contextAlive || !isContextValid()) return;
+    const { name } = e.detail || {};
+    if (name) {
+        console.log(`🤖 Extension received automation request from Dashboard for: ${name}`);
+        safeSendMessage({ type: "AUTOMATE_WA_MUTE", name });
+    }
+  });
+
   // -----------------------------------------------------------
   // 📡 BROADCAST FOCUS STATE TO PAGE CONTEXT
   // -----------------------------------------------------------
-  function broadcastFocus(isActive) {
+  function broadcastUpdates(isActive, blockedSites = [], mutedWhatsAppChats = []) {
     try {
       window.dispatchEvent(
-        new CustomEvent("__pa_focus__", { detail: { on: isActive } })
+        new CustomEvent("__pa_update__", { 
+          detail: { 
+            on: isActive, 
+            blockedSites,
+            mutedWhatsAppChats
+          } 
+        })
       );
     } catch (e) {}
   }
 
+
   // -----------------------------------------------------------
   // 🔄 GET INITIAL FOCUS STATE
   // -----------------------------------------------------------
-  safeSendMessage({ type: "GET_FOCUS_MODE" }, function (response) {
+  // 🔄 GET INITIAL SYNC DATA
+  safeSendMessage({ type: "GET_SYNC_DATA" }, function (response) {
     if (response) {
       focusModeActive = response.focusMode || false;
-      broadcastFocus(focusModeActive);
+      mutedWhatsAppChats = response.mutedWhatsAppChats || [];
+      broadcastUpdates(focusModeActive, response.blockedSites, mutedWhatsAppChats);
     }
   });
+
+  function applyMuteVisuals() {
+    scrapeWhatsApp();
+  }
+
+
 
   // -----------------------------------------------------------
   // 👂 LISTEN FOR FOCUS MODE CHANGES FROM BACKGROUND
@@ -146,8 +173,17 @@
         }
         if (message.type === "FOCUS_MODE_CHANGED") {
           focusModeActive = message.focusMode;
-          broadcastFocus(focusModeActive);
+          broadcastUpdates(focusModeActive, message.blockedSites, message.mutedWhatsAppChats);
+        } else if (message.type === "MUTE_LIST_UPDATE") {
+          mutedWhatsAppChats = message.mutedNames;
+          broadcastUpdates(focusModeActive, [], mutedWhatsAppChats);
+          applyMuteVisuals();
+        } else if (message.type === "TRIGGER_WA_MUTE_DOM") {
+          console.log(`🎯 [ContentScript] Triggering DOM automation for: ${message.name}`);
+          automateWhatsAppMute(message.name);
         }
+
+
       });
     } catch (e) {
       contextAlive = false;
@@ -257,19 +293,149 @@
         const timeEl = el.querySelector("div[style*='color: var(--secondary)']"); 
         
         if (nameEl) {
+          const name = nameEl.title;
+          const isMuted = mutedWhatsAppChats.includes(name);
+          
           chats.push({
             id: index,
-            name: nameEl.title,
+            name: name,
             snippet: snippetEl ? snippetEl.innerText : "...",
             time: timeEl ? timeEl.innerText : "",
             unread: !!el.querySelector("span[aria-label*='unread']"),
+            isMuted: isMuted
           });
+
+          // Apply visual mute to the DOM element
+          if (isMuted) {
+            el.style.opacity = "0.3";
+            el.style.filter = "grayscale(1) contrast(0.8)";
+            el.style.transition = "all 0.4s ease";
+            if (!el.querySelector(".saraswati-mute-badge")) {
+                const badge = document.createElement("div");
+                badge.className = "saraswati-mute-badge";
+                badge.innerText = "🔇 SARASWATI MUTED";
+                badge.style.cssText = "font-size: 8px; font-weight: 900; color: #10b981; background: rgba(16,185,129,0.1); padding: 2px 6px; border-radius: 4px; margin-top: 4px; width: fit-content; border: 1px solid rgba(16,185,129,0.2);";
+                nameEl.parentElement.appendChild(badge);
+            }
+          } else {
+            el.style.opacity = "1";
+            el.style.filter = "none";
+            const badge = el.querySelector(".saraswati-mute-badge");
+            if (badge) badge.remove();
+          }
         }
+
       } catch (err) {}
     });
 
     if (chats.length > 0) {
       safeSendMessage({ type: "UPDATE_WHATSAPP_CHATS", chats });
+    }
+  }
+
+  // -----------------------------------------------------------
+  // 🤖 WHATSAPP AUTOMATION (DOM-LEVEL)
+  // -----------------------------------------------------------
+  async function automateWhatsAppMute(targetName) {
+    if (!window.location.hostname.includes("whatsapp.com")) return;
+    console.log(`🤖 [Automation] Starting mute sequence for: "${targetName}"...`);
+
+    // 1. Find the chat element more robustly
+    let targetEl = null;
+
+    // Search all spans with titles first
+    const spans = Array.from(document.querySelectorAll("span[title]"));
+    const targetSpan = spans.find(s => s.title === targetName);
+
+    if (targetSpan) {
+        // Find the closest parent that acts as a row/button (usually has relative/absolute positioning)
+        targetEl = targetSpan.closest("div[role='row']") || targetSpan.closest("div[role='button']") || targetSpan.closest("nav + div > div > div");
+    }
+
+    if (!targetEl) {
+        console.warn(`🕵️ Chat "${targetName}" not found via title search, trying role search...`);
+        const rows = document.querySelectorAll("div[role='row']");
+        for (const r of rows) {
+            if (r.innerText.includes(targetName)) {
+                targetEl = r;
+                break;
+            }
+        }
+    }
+
+    if (!targetEl) {
+        console.error(`❌ [Automation] Could not find chat item for: ${targetName}`);
+        return;
+    }
+
+    try {
+        console.log("🖱️ [Automation] Found chat, triggering Right-Click...");
+        targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        await new Promise(r => setTimeout(r, 300));
+
+        const rect = targetEl.getBoundingClientRect();
+        const ev = new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            button: 2,
+            buttons: 2,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+        });
+        targetEl.dispatchEvent(ev);
+
+        // 3. Wait for context menu
+        await new Promise(r => setTimeout(r, 600));
+
+        // 4. Find the "Mute" menu item
+        const menuItems = Array.from(document.querySelectorAll("div[role='button'], li, [role='listitem']"));
+        let muteOption = menuItems.find(i => {
+            const text = i.innerText.toLowerCase();
+            return text.includes("mute") && !text.includes("unmute");
+        });
+
+        if (muteOption) {
+            console.log("✅ [Automation] Found Mute option, clicking...");
+            muteOption.click();
+
+            // 5. Wait for the dialog
+            await new Promise(r => setTimeout(r, 1000));
+
+            // 6. Select "8 hours" (User's preferred default)
+            const labels = Array.from(document.querySelectorAll("label, span, div"));
+            const eightHoursBtn = labels.find(l => l.innerText.toLowerCase().includes("8 hours"));
+            const alwaysBtn = labels.find(l => {
+                const text = l.innerText.toLowerCase();
+                return text === "always" || text.includes("1 year") || text === "8 hours";
+            });
+
+            const durationBtn = eightHoursBtn || alwaysBtn;
+
+            if (durationBtn) {
+                console.log(`✅ [Automation] Selecting duration: "${durationBtn.innerText}"...`);
+                durationBtn.click();
+                await new Promise(r => setTimeout(r, 400));
+            }
+
+            // 7. Click confirm
+            const buttons = Array.from(document.querySelectorAll("button"));
+            const confirmBtn = buttons.find(b => {
+                const text = b.innerText.toLowerCase();
+                return text === "mute notifications" || text === "mute";
+            });
+
+            if (confirmBtn) {
+                console.log("🚀 [Automation] Clicking final confirm button!");
+                confirmBtn.click();
+                return;
+            }
+            console.warn("⚠️ [Automation] Could not find confirmation button in dialog.");
+        } else {
+            console.warn("⚠️ [Automation] 'Mute' option not in menu - is it already muted?");
+        }
+    } catch (e) {
+        console.error("❌ [Automation] CRITICAL ERROR", e);
     }
   }
 

@@ -356,3 +356,48 @@
   color: #64748b;
   font-size: 0.875rem;
 }
+
+/* ============================================================
+   ✨ Presets Marketplace & Detail Styles
+   ============================================================ */
+
+.preset-card-active {
+  border-color: var(--platform-color);
+  box-shadow: 0 0 25px rgba(var(--platform-color-rgb), 0.15);
+  background: rgba(var(--platform-color-rgb), 0.05);
+}
+
+.category-pill-active {
+  background: var(--platform-color) !important;
+  color: white !important;
+  box-shadow: 0 4px 12px rgba(var(--platform-color-rgb), 0.3);
+}
+
+.active-preset-banner {
+  background: linear-gradient(90deg, rgba(var(--platform-color-rgb), 0.1), transparent);
+  border-left: 4px solid var(--platform-color);
+  backdrop-blur: md;
+}
+
+.mute-list-item {
+  @apply flex items-center justify-between p-4 rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-all duration-200;
+}
+
+.mute-list-item:hover {
+  @apply border-white/10 translate-x-1;
+}
+
+.config-toggle-active {
+  background: var(--platform-color);
+  box-shadow: 0 0 10px rgba(var(--platform-color-rgb), 0.3);
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out forwards;
+}
+
