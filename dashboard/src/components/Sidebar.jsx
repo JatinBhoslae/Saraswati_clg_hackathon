@@ -15,6 +15,7 @@ const Sidebar = ({ gamification = { xp: 240, level: 3, dailyStreak: 5, nextLevel
   const navItems = [
     { title: "Dashboard", path: "/dashboard", icon: <LayoutDashboard size={20} /> },
     { title: "Analytics", path: "/analytics", icon: <BarChart3 size={20} /> },
+    { title: "Action Center", path: "/action-center", icon: <Zap size={20} /> },
     { title: "Manage", path: "/manage", icon: <Shield size={20} /> },
     { title: "Settings", path: "/settings", icon: <Settings size={20} /> },
   ];

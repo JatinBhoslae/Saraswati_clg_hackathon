@@ -6,6 +6,8 @@
 // In production, replace with MongoDB/PostgreSQL.
 // ============================================================
 
+const { ActivityLog, CustomSite } = require("./db");
+
 const MAX_LOGS = 1000; // Prevent memory overflow
 
 // -----------------------------------------------------------
@@ -23,12 +25,31 @@ let totalFocusTimeMs = 0;
 // -----------------------------------------------------------
 // 🛑 Custom Blocked Sites
 // -----------------------------------------------------------
-let customBlockedSites = [
-  "youtube.com",
-  "instagram.com",
-  "twitter.com",
-  "reddit.com",
-];
+let customBlockedSites = [];
+
+// Initialization - Load from DB
+async function initStore() {
+  try {
+    const logs = await ActivityLog.find().sort({ timestamp: -1 }).limit(MAX_LOGS).lean();
+    activityLogs = logs.reverse(); // oldest to newest in array
+
+    const sites = await CustomSite.find().lean();
+    if (sites.length === 0) {
+      // Default sites if DB is fully empty
+      const defaultSites = ["youtube.com", "instagram.com", "twitter.com", "reddit.com"];
+      customBlockedSites = defaultSites;
+      await CustomSite.insertMany(defaultSites.map(s => ({ site: s })));
+    } else {
+      customBlockedSites = sites.map((s) => s.site);
+    }
+    console.log("✅ Store synced successfully with MongoDB");
+  } catch (err) {
+    console.error("🔴 Failed to sync store from MongoDB", err);
+  }
+}
+
+// Call initStore immediately on backend boot
+initStore();
 
 // -----------------------------------------------------------
 // 💬 Platform Specific Data
@@ -66,17 +87,20 @@ const store = {
 
   /** Add a log entry to the store and award XP */
   addLog(logEntry) {
-    activityLogs.push(logEntry);
+    const fullLog = { ...logEntry, timestamp: new Date() };
+    activityLogs.push(fullLog);
     
     // Award XP based on productivity
     if (logEntry.type === "productive") {
       this.addXP(10);
-    } else if (logEntry.type === "distraction") {
-      // Small penalty or no XP
     }
+    
+    // Non-blocking Write-Through to DB
+    ActivityLog.create(fullLog).catch(err => console.error("DB Error saving log:", err));
 
     // Auto-trim to prevent memory issues
     if (activityLogs.length > MAX_LOGS) {
+      // Memory cleanup, we let DB keep history
       activityLogs = activityLogs.slice(-MAX_LOGS);
     }
 
@@ -119,6 +143,7 @@ const store = {
   /** Clear all logs */
   clearLogs() {
     activityLogs = [];
+    ActivityLog.deleteMany({}).catch(() => {});
   },
 
   // === GAMIFICATION ACCESSORS ===
@@ -158,7 +183,6 @@ const store = {
   /** Set focus mode on/off and track time */
   setFocusMode(newMode) {
     if (newMode && !focusMode) {
-      // Starting focus mode
       focusModeStartTime = Date.now();
       this.addXP(5); // Reward for starting focus
     } else if (!newMode && focusMode && focusModeStartTime) {
@@ -168,13 +192,11 @@ const store = {
       
       // Reward deep work time (1 XP per minute)
       this.addXP(Math.floor(sessionMs / 60000));
-      
       focusModeStartTime = null;
     }
     focusMode = newMode;
   },
 
-  /** Get current focus state */
   getFocusState() {
     return {
       focusMode,
@@ -195,24 +217,26 @@ const store = {
   addCustomSite(site) {
     if (!customBlockedSites.includes(site)) {
       customBlockedSites.push(site);
+      CustomSite.create({ site }).catch(err => console.error("DB Error saving site:", err));
     }
   },
 
   removeCustomSite(site) {
     customBlockedSites = customBlockedSites.filter((s) => s !== site);
+    CustomSite.deleteOne({ site }).catch(() => {});
   },
 
-  // === UTILS ===
-
-  /** Reset everything (useful for testing) */
   reset() {
     activityLogs = [];
     focusMode = false;
     focusModeStartTime = null;
     totalFocusTimeMs = 0;
     customBlockedSites = [];
+    ActivityLog.deleteMany({}).catch(() => {});
+    CustomSite.deleteMany({}).catch(() => {});
   },
 };
 
 module.exports = store;
+
 

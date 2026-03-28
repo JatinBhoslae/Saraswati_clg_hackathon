@@ -20,6 +20,7 @@ const focusRoutes = require("./routes/focusRoutes");
 const settingsRoutes = require("./routes/settingsRoutes");
 const platformRoutes = require("./routes/platformRoutes");
 const gmailRoutes = require("./routes/gmailRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -61,6 +62,7 @@ app.use("/api", focusRoutes(store));
 app.use("/api", settingsRoutes(store));
 app.use("/api", platformRoutes(store));
 app.use("/api/gmail", gmailRoutes(store));
+app.use("/api/notifications", notificationRoutes(() => store.getFocusState()));
 
 // -----------------------------------------------------------
 // ❌ 404 Handler

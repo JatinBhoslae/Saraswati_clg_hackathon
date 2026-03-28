@@ -156,13 +156,10 @@ async function syncFocusState() {
 async function applyFocusState(newMode) {
   await chrome.storage.local.set({ focusMode: newMode });
 
-  // 1. Block/Unblock notifications at browser level
+  // 1. Mute notifications (We rely on content script interception for tracking, 
+  // so we CLEAR native blocks to allow scripts to catch the events)
   if (chrome.contentSettings && chrome.contentSettings.notifications) {
-    if (newMode) {
-      chrome.contentSettings.notifications.set({ primaryPattern: "<all_urls>", setting: "block" });
-    } else {
-      chrome.contentSettings.notifications.clear({});
-    }
+    chrome.contentSettings.notifications.clear({});
   }
 
   // 2. Broadcast to all tabs & Mute/Unmute
@@ -200,6 +197,49 @@ setInterval(() => {
     };
   }
 }, 300000); // Check every 5 min
+
+// -----------------------------------------------------------
+// 🔄 SYNC FOCUS MODE STATE WITH DASHBOARD
+// -----------------------------------------------------------
+setInterval(async () => {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/focus`);
+    if (res.ok) {
+      const data = await res.json();
+      const backendFocusMode = data.focusMode;
+      
+      chrome.storage.local.get("focusMode", (localData) => {
+        if (localData.focusMode !== backendFocusMode) {
+          // Dashboard changed the state -> Update Extension State
+          chrome.storage.local.set({ focusMode: backendFocusMode }, () => {
+            // (We purposely do NOT block chrome.contentSettings.notifications natively anymore. 
+            // We want the web apps to receive the notification so our JS page-script interception 
+            // logic can capture the payload and log it towards the Dashboard Analytics!)
+            
+            // Sync all active tabs (muting + content script signals)
+            chrome.tabs.query({}, (tabs) => {
+              tabs.forEach((tab) => {
+                if (tab.id && !tab.url?.startsWith("chrome://")) {
+                  try {
+                    chrome.tabs.update(tab.id, { muted: backendFocusMode }).catch(() => {});
+                  } catch (e) {}
+                  
+                  chrome.tabs.sendMessage(tab.id, {
+                    type: "FOCUS_MODE_CHANGED",
+                    focusMode: backendFocusMode,
+                  }).catch(() => {});
+                }
+              });
+            });
+            console.log(`🔄 Focus State Synced from Dashboard: ${backendFocusMode}`);
+          });
+        }
+      });
+    }
+  } catch (e) {
+    // Backend purely offline
+  }
+}, 2000);
 
 // -----------------------------------------------------------
 // 🧠 GENERATE SESSION SUMMARY
@@ -254,8 +294,18 @@ async function handleTabChange(tabId, url) {
   // 2. Classify the site, overriding with custom rules if applicable
   let type = classifySite(url);
   try {
-    const hostname = new URL(url).hostname;
-    if (customSites.some(s => hostname.includes(s))) {
+    const hostname = new URL(url).hostname.replace(/^www\./, "");
+    
+    // Normalize user-entered sites to strip protocol and www
+    const isCustomBlocked = customSites.some(rawSite => {
+      let cleanSite = rawSite.trim().toLowerCase();
+      cleanSite = cleanSite.replace(/^https?:\/\//, "");
+      cleanSite = cleanSite.replace(/^www\./, "");
+      cleanSite = cleanSite.split('/')[0]; // Strip paths
+      return hostname.includes(cleanSite) || cleanSite.includes(hostname);
+    });
+
+    if (isCustomBlocked) {
       type = "distraction";
     }
   } catch (e) {}
@@ -347,9 +397,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }).catch(() => {});
 
       // Apply changes locally (mute, block, notify)
+      // Removed native OS block to allow our interception scripts to track for the dashboard
       applyFocusState(newMode);
 
-      console.log(`🎯 Focus Mode ${newMode ? "ON — all notifications blocked" : "OFF — notifications restored"}`);
+      console.log(`🎯 Focus Mode ${newMode ? "ON — notifications intercepted" : "OFF — notifications restored"}`);
       sendResponse({ focusMode: newMode });
     });
     return true;
@@ -362,7 +413,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Update local counter
     sessionStats.blocked++;
     
-    // Send to backend so it counts towards 'Blocked Today'
+    // Send to backend so it counts towards 'Blocked Today' logs table
     sendLog({
       url: message.data?.url || "",
       hostname: message.data?.hostname || "unknown",
@@ -374,6 +425,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         title: message.data?.title
       }
     });
+
+    // Also heavily forward this to the new Unified Action Center AI Router!
+    fetch(`${BACKEND_URL}/api/notifications/route`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform: message.data?.hostname || "Web Platform",
+        sender: "Background Alert",
+        content: message.data?.title || "Silently intercepted browser notification",
+        metadata: { source: "Focus Mode Observer" }
+      })
+    }).catch(() => {});
     
     return false;
   }

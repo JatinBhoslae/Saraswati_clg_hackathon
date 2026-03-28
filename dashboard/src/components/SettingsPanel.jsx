@@ -12,8 +12,13 @@ const SettingsPanel = ({
 
   const handleAddSite = (e) => {
     e.preventDefault();
-    if (newSite && !customBlockedSites.includes(newSite)) {
-      onAddSite(newSite);
+    const cleanedSite = newSite.trim().toLowerCase();
+    
+    if (cleanedSite && !customBlockedSites.some(s => s.toLowerCase() === cleanedSite)) {
+      onAddSite(cleanedSite);
+      setNewSite("");
+    } else if (cleanedSite) {
+      // If it exists, string doesn't get added, but clear input so they know it's a dupe
       setNewSite("");
     }
   };

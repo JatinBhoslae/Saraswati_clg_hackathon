@@ -38,16 +38,15 @@ Return ONLY a valid JSON object matching this schema:
 }
 `;
 
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro", generationConfig: { responseMimeType: "application/json" } });
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
-      
-      let decision;
+      let decision = { decision: "deliver", reason: "Direct forward (AI analysis skipped)", priority: 5 };
       try {
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
         decision = JSON.parse(text);
-      } catch (err) {
-        console.error("Failed to parse Gemini output:", text);
-        decision = { decision: "deliver", reason: "Fallback logic due to processing error", priority: 5 };
+      } catch (aiError) {
+        console.error("⚠️ AI Router Fallback Triggered (Gemini Error):", aiError.message);
+        decision = { decision: "deliver", reason: "Fallback logic due to API processing error", priority: 5 };
       }
 
       console.log(`🧠 AI Notification Decision for [${platform} from ${sender}]: ${decision.decision}`);

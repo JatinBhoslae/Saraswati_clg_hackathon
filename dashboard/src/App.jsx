@@ -23,9 +23,12 @@ import ChartSection from "./components/ChartSection";
 import LogsTable from "./components/LogsTable";
 import NotificationPanel from "./components/NotificationPanel";
 import SettingsPanel from "./components/SettingsPanel";
+import ActionCenter from "./components/ActionCenter";
 import ManagePage from "./components/ManagePage";
 import WhatsAppManage from "./components/WhatsAppManage";
+import InstagramManage from "./components/InstagramManage";
 import GmailManage from "./components/GmailManage";
+import OutlookManage from "./components/OutlookManage";
 import ScoreRing from "./components/ScoreRing";
 import GlassCard from "./components/GlassCard";
 
@@ -153,7 +156,6 @@ function App() {
       </div>
     );
   }
-
   const pageVariants = {
     initial: { opacity: 0, y: 10 },
     animate: { opacity: 1, y: 0 },
@@ -271,8 +273,16 @@ function App() {
                   <Routes>
                     <Route index element={<ManagePage setActiveTab={(id) => navigate(`/manage/${id.replace('manage-', '')}`)} />} />
                     <Route path="whatsapp" element={<WhatsAppManage />} />
+                    <Route path="instagram" element={<InstagramManage />} />
                     <Route path="gmail" element={<GmailManage />} />
+                    <Route path="outlook" element={<OutlookManage />} />
                   </Routes>
+                </motion.div>
+              } />
+
+              <Route path="/action-center" element={
+                <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit">
+                  <ActionCenter />
                 </motion.div>
               } />
               

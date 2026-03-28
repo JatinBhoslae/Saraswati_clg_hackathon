@@ -38,7 +38,14 @@ module.exports = function (store) {
     if (!classifiedType) {
       // 1st priority: Check user's custom blocked sites
       const customSites = store.getCustomSites() || [];
-      const isCustomBlocked = customSites.some((s) => hostname.includes(s));
+      const isCustomBlocked = customSites.some(rawSite => {
+        let cleanSite = rawSite.trim().toLowerCase();
+        cleanSite = cleanSite.replace(/^https?:\/\//, "");
+        cleanSite = cleanSite.replace(/^www\./, "");
+        cleanSite = cleanSite.split('/')[0];
+        return hostname.includes(cleanSite) || cleanSite.includes(hostname);
+      });
+      
       if (isCustomBlocked) {
         classifiedType = "distraction";
       } else {
