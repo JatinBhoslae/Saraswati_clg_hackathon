@@ -3,187 +3,73 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Focus Assistant</title>
+  <title>Productivity Assistant</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-
-<!-- ============================================================
-     STATE 1: LANDING PAGE (first-time user)
-     ============================================================ -->
-<div id="state-landing" class="popup-state">
-  <div class="landing-bg">
-    <div class="landing-orb orb1"></div>
-    <div class="landing-orb orb2"></div>
-  </div>
-
-  <div class="landing-content">
-    <div class="landing-logo">
-      <span class="landing-brain">🧠</span>
-      <div class="landing-pulse-ring"></div>
-    </div>
-    <h1 class="landing-title">Focus Assistant</h1>
-    <p class="landing-sub">Your AI-powered notification &amp; distraction controller</p>
-
-    <div class="landing-features">
-      <div class="lf-item">🔕 Mute any app's notifications</div>
-      <div class="lf-item">🛡️ Block distracting sites</div>
-      <div class="lf-item">📊 Track your productivity</div>
+  <div class="popup-container">
+    <!-- Header -->
+    <div class="popup-header">
+      <div class="logo">🧠</div>
+      <h1>Focus Assistant</h1>
+      <p class="subtitle">Stay productive, stay focused</p>
+      <p class="today-date" id="todayDate"></p>
     </div>
 
-    <button id="btn-configure" class="btn-primary btn-glow">
-      ⚙️ Configure Extension
-    </button>
-    <p class="landing-hint">Takes 30 seconds to set up</p>
-  </div>
-</div>
-
-<!-- ============================================================
-     STATE 2: GRANT ACCESS PAGE
-     ============================================================ -->
-<div id="state-grant" class="popup-state hidden">
-  <div class="grant-header">
-    <button id="btn-back-grant" class="btn-back">← Back</button>
-    <div class="grant-step">Step 1 of 2</div>
-  </div>
-
-  <div class="grant-content">
-    <div class="grant-icon">🔐</div>
-    <h2 class="grant-title">Grant Access</h2>
-    <p class="grant-desc">
-      Focus Assistant needs these permissions to help you manage notifications and stay focused.
-    </p>
-
-    <div class="grant-perms">
-      <div class="perm-item">
-        <div class="perm-icon perm-ok">✓</div>
+    <!-- Focus Mode Toggle -->
+    <div class="focus-section">
+      <div class="focus-label">
+        <span class="focus-icon" id="focusIcon">😴</span>
         <div>
-          <p class="perm-name">Tab Management</p>
-          <p class="perm-detail">Monitor and mute browser tabs</p>
+          <strong id="focusTitle">Focus Mode Off</strong>
+          <p id="focusDesc" class="focus-desc">Distractions are allowed</p>
         </div>
       </div>
-      <div class="perm-item">
-        <div class="perm-icon perm-ok">✓</div>
-        <div>
-          <p class="perm-name">Notifications</p>
-          <p class="perm-detail">Block or allow push notifications</p>
-        </div>
-      </div>
-      <div class="perm-item">
-        <div class="perm-icon perm-ok">✓</div>
-        <div>
-          <p class="perm-name">Storage</p>
-          <p class="perm-detail">Save your preferences locally</p>
-        </div>
-      </div>
-      <div class="perm-item">
-        <div class="perm-icon perm-ok">✓</div>
-        <div>
-          <p class="perm-name">WhatsApp Web Access</p>
-          <p class="perm-detail">Read chat list to apply mute rules</p>
-        </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="focusToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- Status Info -->
+    <div class="status-section">
+      <div class="status-card" id="statusCard">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Monitoring your activity...</span>
       </div>
     </div>
 
-    <button id="btn-grant" class="btn-primary btn-glow">
-      🔓 Grant Access &amp; Continue
-    </button>
-    <p class="grant-note">We never read message content. Only chat names &amp; metadata.</p>
-  </div>
-</div>
-
-<!-- ============================================================
-     STATE 3: MAIN PAGE (setup button for fresh users)
-     ============================================================ -->
-<div id="state-main" class="popup-state hidden">
-  <div class="main-header">
-    <div class="main-brand">
-      <span>🧠</span>
-      <span class="main-brand-name">Focus Assistant</span>
-    </div>
-    <div class="main-connected" id="main-connected">
-      <span class="dot-green"></span> Ready
-    </div>
-  </div>
-
-  <!-- SETUP BANNER (shown only for users who haven't set up) -->
-  <div id="setup-banner" class="setup-banner">
-    <div class="setup-banner-icon">🚀</div>
-    <div class="setup-banner-text">
-      <p class="setup-banner-title">You're all set!</p>
-      <p class="setup-banner-sub">Set up notification rules for your apps</p>
-    </div>
-    <button id="btn-setup" class="btn-setup">Setup →</button>
-  </div>
-
-  <!-- Focus Mode Toggle -->
-  <div class="focus-row" id="focusRow">
-    <div class="focus-row-left">
-      <span class="focus-row-icon" id="focusIcon">😴</span>
-      <div>
-        <p class="focus-row-title" id="focusTitle">Focus Mode Off</p>
-        <p class="focus-row-sub" id="focusDesc">Distractions are allowed</p>
+    <!-- Quick Stats (4 cards) -->
+    <div class="stats-section">
+      <div class="stat">
+        <span class="stat-value" id="todayBlocked">0</span>
+        <span class="stat-label">Blocked Today</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="focusTime">0m</span>
+        <span class="stat-label">Focus Time</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value stat-productive" id="productiveCount">0</span>
+        <span class="stat-label">Productive</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value stat-score" id="scoreValue">0%</span>
+        <span class="stat-label">Score</span>
       </div>
     </div>
-    <label class="toggle-switch">
-      <input type="checkbox" id="focusToggle">
-      <span class="slider"></span>
-    </label>
-  </div>
 
-  <!-- Quick Stats -->
-  <div class="stats-grid">
-    <div class="stat-card">
-      <span class="stat-val" id="todayBlocked">0</span>
-      <span class="stat-key">Blocked</span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-val" id="focusTime">0m</span>
-      <span class="stat-key">Focus Time</span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-val stat-green" id="productiveCount">0</span>
-      <span class="stat-key">Productive</span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-val stat-purple" id="scoreValue">0%</span>
-      <span class="stat-key">Score</span>
+    <!-- Open Dashboard Link -->
+    <a href="http://localhost:5173" target="_blank" class="dashboard-link">
+      📊 Open Dashboard
+    </a>
+
+    <!-- Footer -->
+    <div class="popup-footer">
+      <p>v2.0 · Context-Aware Productivity Assistant</p>
     </div>
   </div>
 
-  <!-- Platform Mute Quick Actions -->
-  <div class="quick-mute-label">Quick Mute</div>
-  <div class="platform-grid" id="platformGrid">
-    <button class="platform-btn" data-platform="whatsapp" id="qm-whatsapp">
-      <span class="platform-btn-icon">💬</span>
-      <span>WhatsApp</span>
-      <span class="platform-mute-state" id="qms-whatsapp">Active</span>
-    </button>
-    <button class="platform-btn" data-platform="instagram" id="qm-instagram">
-      <span class="platform-btn-icon">📸</span>
-      <span>Instagram</span>
-      <span class="platform-mute-state" id="qms-instagram">Active</span>
-    </button>
-    <button class="platform-btn" data-platform="gmail" id="qm-gmail">
-      <span class="platform-btn-icon">✉️</span>
-      <span>Gmail</span>
-      <span class="platform-mute-state" id="qms-gmail">Active</span>
-    </button>
-    <button class="platform-btn" data-platform="outlook" id="qm-outlook">
-      <span class="platform-btn-icon">📧</span>
-      <span>Outlook</span>
-      <span class="platform-mute-state" id="qms-outlook">Active</span>
-    </button>
-  </div>
-
-  <!-- Footer Links -->
-  <div class="main-footer">
-    <a href="http://localhost:5173" target="_blank" class="footer-link">📊 Dashboard</a>
-    <a href="http://localhost:5173" target="_blank" class="footer-link" id="link-manage">🔕 Manage Notifs</a>
-    <button class="footer-link" id="btn-reset">↩ Reset</button>
-  </div>
-</div>
-
-<script src="popup.js"></script>
+  <script src="popup.js"></script>
 </body>
 </html>

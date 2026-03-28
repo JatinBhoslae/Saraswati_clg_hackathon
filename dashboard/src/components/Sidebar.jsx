@@ -1,22 +1,11 @@
 import React from "react";
 
-const Sidebar = ({ activeTab, setActiveTab, muteSettings }) => {
+const Sidebar = ({ activeTab, setActiveTab }) => {
   const tabs = [
     { id: "dashboard", label: "Dashboard", icon: "📊" },
-    { id: "action-center", label: "Action Center", icon: "⚡" },
     { id: "analytics", label: "Analytics", icon: "📈" },
-    { id: "manage", label: "Manage Notifs", icon: "🔕" },
     { id: "settings", label: "Settings", icon: "⚙️" },
   ];
-
-  const activeMuteCount = Object.values(muteSettings || {}).filter(Boolean).length;
-
-  const isManageActive =
-    activeTab === "manage" ||
-    activeTab === "manage-whatsapp" ||
-    activeTab === "manage-gmail" ||
-    activeTab === "manage-outlook" ||
-    activeTab === "manage-instagram";
 
   return (
     <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col h-screen fixed left-0 top-0 text-slate-300">
@@ -35,26 +24,20 @@ const Sidebar = ({ activeTab, setActiveTab, muteSettings }) => {
 
       {/* Navigation */}
       <nav className="flex-1 p-4 flex flex-col gap-2">
-        {tabs.map((tab) => {
-          const isActive = tab.id === "manage" ? isManageActive : activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
-                isActive
-                  ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                  : "hover:bg-slate-800/50 hover:text-white border border-transparent"
-              }`}
-            >
-              <span className="text-xl">{tab.icon}</span>
-              <span className="font-medium flex-1 text-left">{tab.label}</span>
-              {tab.id === "manage" && activeMuteCount > 0 && (
-                <span className="sidebar-mute-badge">{activeMuteCount}</span>
-              )}
-            </button>
-          );
-        })}
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
+              activeTab === tab.id
+                ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                : "hover:bg-slate-800/50 hover:text-white border border-transparent"
+            }`}
+          >
+            <span className="text-xl">{tab.icon}</span>
+            <span className="font-medium">{tab.label}</span>
+          </button>
+        ))}
       </nav>
 
       {/* Footer User Profile */}

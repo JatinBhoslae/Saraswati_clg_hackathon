@@ -10,26 +10,12 @@ import ChartSection from "./components/ChartSection";
 import LogsTable from "./components/LogsTable";
 import NotificationPanel from "./components/NotificationPanel";
 import SettingsPanel from "./components/SettingsPanel";
-import ManagePage from "./components/ManagePage";
-import WhatsAppManage from "./components/WhatsAppManage";
-import GmailManage from "./components/GmailManage";
-import OutlookManage from "./components/OutlookManage";
-import InstagramManage from "./components/InstagramManage";
-import ActionCenter from "./components/ActionCenter";
 
 const API_URL = "http://localhost:5001/api";
 
 function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [loading, setLoading] = useState(true);
-
-  // Per-platform mute tracking (for hub badges)
-  const [muteSettings, setMuteSettings] = useState({
-    whatsapp: false,
-    gmail: false,
-    outlook: false,
-    instagram: false,
-  });
 
   // Stats State
   const [stats, setStats] = useState({
@@ -62,6 +48,7 @@ function App() {
     const fetchData = async () => {
       try {
         setLoading(true);
+        // Fetch stats
         const [
           statsRes,
           logsRes,
@@ -103,10 +90,13 @@ function App() {
   const toggleFocusMode = async () => {
     try {
       const newMode = !stats.focusMode;
+      // Optimistic update
       setStats((prev) => ({ ...prev, focusMode: newMode }));
+
       await axios.post(`${API_URL}/focus`, { focusMode: newMode });
     } catch (err) {
       console.error("Failed to toggle focus mode", err);
+      // Revert on fail
       setStats((prev) => ({ ...prev, focusMode: !prev.focusMode }));
     }
   };
@@ -133,52 +123,9 @@ function App() {
   };
 
   // -----------------------------------------------------------
-  // 🔕 PLATFORM MUTE CHANGE HANDLER
-  // -----------------------------------------------------------
-  const handlePlatformMuteChange = (platform, isMuted) => {
-    setMuteSettings((prev) => ({ ...prev, [platform]: isMuted }));
-  };
-
-  // -----------------------------------------------------------
-  // 📋 GET HEADER TITLE
-  // -----------------------------------------------------------
-  const getHeaderTitle = () => {
-    if (activeTab === "dashboard") return "Dashboard Overview";
-    if (activeTab === "action-center") return "Unified Action Center";
-    if (activeTab === "analytics") return "Productivity Analytics";
-    if (activeTab === "settings") return "Preferences & Settings";
-    if (activeTab === "manage") return "Notification Manager";
-    if (activeTab === "manage-whatsapp") return "WhatsApp · Notification Control";
-    if (activeTab === "manage-gmail") return "Gmail · Notification Control";
-    if (activeTab === "manage-outlook") return "Outlook · Notification Control";
-    if (activeTab === "manage-instagram") return "Instagram · Notification Control";
-    return "Focus Assistant";
-  };
-
-  // -----------------------------------------------------------
   // 🎨 RENDER CONTENT BASED ON TAB
   // -----------------------------------------------------------
   const renderContent = () => {
-    // Manage sub-pages
-    if (activeTab === "action-center") {
-      return <ActionCenter />;
-    }
-    if (activeTab === "manage") {
-      return <ManagePage setActiveTab={setActiveTab} muteSettings={muteSettings} />;
-    }
-    if (activeTab === "manage-whatsapp") {
-      return <WhatsAppManage setActiveTab={setActiveTab} onMuteChange={handlePlatformMuteChange} />;
-    }
-    if (activeTab === "manage-gmail") {
-      return <GmailManage setActiveTab={setActiveTab} onMuteChange={handlePlatformMuteChange} />;
-    }
-    if (activeTab === "manage-outlook") {
-      return <OutlookManage setActiveTab={setActiveTab} onMuteChange={handlePlatformMuteChange} />;
-    }
-    if (activeTab === "manage-instagram") {
-      return <InstagramManage setActiveTab={setActiveTab} onMuteChange={handlePlatformMuteChange} />;
-    }
-
     if (loading) {
       return (
         <div className="flex-1 flex justify-center items-center">
@@ -207,7 +154,7 @@ function App() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl mt-6 relative overflow-hidden isolate">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-teal-400" />
             <h3 className="text-xl font-semibold text-emerald-400 mb-4 flex items-center gap-2">
-              <span>💡</span> AI Insights &amp; Summary
+              <span>💡</span> AI Insights & Summary
             </h3>
             <p className="text-slate-300 font-medium leading-relaxed mb-6">
               {summary || "Analyzing recent activity..."}
@@ -247,6 +194,7 @@ function App() {
           />
           <StatsCard
             title="Productive Mins"
+            // Converting productive logs to rough minutes (2m per log proxy)
             value={Math.round(stats.productive * 2)}
             icon="⏱️"
             gradient="from-emerald-500 to-teal-500"
@@ -267,7 +215,7 @@ function App() {
         </div>
 
         {/* NOTIFICATIONS & ACTIVITY LOGS ROW */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start mt-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
           <div className="lg:col-span-1">
             <NotificationPanel blockedNotifications={blockedNotifs} />
           </div>
@@ -281,12 +229,16 @@ function App() {
 
   return (
     <div className="flex min-h-screen bg-[#0f0f1a] text-slate-200">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} muteSettings={muteSettings} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
       {/* Main Content Area */}
       <main className="flex-1 ml-64 flex flex-col min-h-screen relative isolate">
         <Header 
-          title={getHeaderTitle()}
+          title={
+            activeTab === "dashboard" ? "Dashboard Overview" :
+            activeTab === "analytics" ? "Productivity Analytics" : 
+            "Preferences & Settings"
+          }
           focusMode={stats.focusMode} 
           onToggleFocus={toggleFocusMode} 
         />

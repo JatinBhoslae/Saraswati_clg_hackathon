@@ -131,43 +131,6 @@ let sessionStats = {
   startTime: Date.now(),
 };
 
-// -----------------------------------------------------------
-// 🔕 PLATFORM MUTE RULES STORE
-// Persisted via chrome.storage.local
-// -----------------------------------------------------------
-const PLATFORM_DOMAINS = {
-  whatsapp: ["web.whatsapp.com", "whatsapp.com"],
-  instagram: ["instagram.com", "www.instagram.com"],
-  gmail: ["mail.google.com", "gmail.com"],
-  outlook: ["outlook.live.com", "outlook.office.com", "mail.live.com"],
-};
-
-// Apply mute to all tabs matching a platform
-async function applyPlatformMuteToTabs(platform, muted) {
-  const domains = PLATFORM_DOMAINS[platform] || [];
-  if (domains.length === 0) return;
-
-  chrome.tabs.query({}, (tabs) => {
-    tabs.forEach((tab) => {
-      if (!tab.url) return;
-      try {
-        const hostname = new URL(tab.url).hostname;
-        const matches = domains.some((d) => hostname.includes(d));
-        if (matches) {
-          chrome.tabs.update(tab.id, { muted }).catch(() => {});
-          // Notify content script about mute state
-          chrome.tabs.sendMessage(tab.id, {
-            type: "PLATFORM_MUTE_CHANGED",
-            platform,
-            muted,
-          }).catch(() => {});
-          console.log(`🔕 Platform mute [${platform}] → ${muted ? "ON" : "OFF"} for tab: ${tab.url}`);
-        }
-      } catch (e) {}
-    });
-  });
-}
-
 // Reset session stats every 2 hours
 setInterval(() => {
   const elapsed = Date.now() - sessionStats.startTime;
@@ -309,8 +272,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 // Listen for messages from popup & content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log(`📡 Background: Received message [${message.type}] from ${sender.tab ? "tab " + sender.tab.id : "popup/extension"}`);
-
   // Focus mode queries
   if (message.type === "GET_FOCUS_MODE") {
     chrome.storage.local.get("focusMode", (data) => {
@@ -383,220 +344,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         title: message.data?.title
       }
     });
-
-    // Phase 6: Route to AI Notification Router (Unified Action Center)
-    let inferredPlatform = "Browser Web Push";
-    if (message.data?.hostname.includes("whatsapp")) inferredPlatform = "WhatsApp";
-    else if (message.data?.hostname.includes("mail.google.com")) inferredPlatform = "Gmail";
-    else if (message.data?.hostname.includes("instagram")) inferredPlatform = "Instagram";
-    else if (message.data?.hostname.includes("office.com")) inferredPlatform = "Outlook";
-
-    fetch(`${BACKEND_URL}/api/notifications/route`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        platform: inferredPlatform,
-        sender: message.data?.title || "Unknown Sender",
-        content: message.data?.body || "New notification",
-        metadata: { url: message.data?.url }
-      })
-    }).catch((err) => console.error("Failed to route to AI:", err));
     
     return false;
   }
 
-  // Interaction report from content script (Phase 4 & 5 Context Engine)
+  // Interaction report from content script (Phase 4)
   if (message.type === "INTERACTION_REPORT") {
-    // Check meeting status via URL
-    const url = message.data?.url || "";
-    const isMeeting = ["meet.google.com", "zoom.us", "teams.microsoft.com"].some(m => url.includes(m));
-
-    chrome.storage.local.get("focusMode", (data) => {
-      const isDeepWork = data.focusMode || message.data?.activityLevel === "High";
-      
-      const userContext = {
-        activityLevel: message.data?.activityLevel || "Idle",
-        inMeeting: isMeeting,
-        deepWork: isDeepWork,
-        currentTask: message.data?.title || "Unknown"
-      };
-
-      // Push Context to Backend
-      fetch(`${BACKEND_URL}/api/context`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(userContext)
-      }).catch(err => console.error("Error updating Context on Backend:", err));
-    });
-
+    // Store interaction data for future ML model training
     console.log("📊 Interaction:", message.data?.url, {
       time: message.data?.timeSpentSec + "s",
       idle: message.data?.isIdle,
-      activityLevel: message.data?.activityLevel
     });
     return false;
-  }
-
-  // ──────────────────────────────────────────────────────────
-  // ✉️ GMAIL DATA — Fetch via OAuth or active tab
-  // ──────────────────────────────────────────────────────────
-  
-  if (message.type === "AUTHORIZE_GMAIL") {
-    chrome.identity.getAuthToken({ interactive: true }, (token) => {
-      if (chrome.runtime.lastError || !token) {
-        sendResponse({ error: "auth_failed", message: chrome.runtime.lastError?.message });
-      } else {
-        sendResponse({ success: true, token });
-      }
-    });
-    return true;
-  }
-
-  if (message.type === "GET_GMAIL_CHATS") {
-    console.log("📨 Background: Fetching Gmail data...");
-    
-    chrome.identity.getAuthToken({ interactive: true }, async (token) => {
-      if (chrome.runtime.lastError || !token) {
-        console.warn("⚠️ Gmail Auth Failed:", chrome.runtime.lastError?.message);
-        sendResponse({ error: "auth_required", message: chrome.runtime.lastError?.message });
-        return;
-      }
-
-      try {
-        // Fetch 50 threads for a better representation of "Frequent" senders
-        const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/threads?maxResults=50", {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const data = await response.json();
-        
-        if (!data.threads) {
-          sendResponse({ chats: [] });
-          return;
-        }
-
-        // Fetch thread metadata (headers & labels)
-        const threadDetails = await Promise.all(data.threads.map(async (t) => {
-          try {
-            const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${t.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`, {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            return res.json();
-          } catch (e) { return null; }
-        }));
-
-        const sendersMap = new Map();
-        threadDetails.forEach(thread => {
-          if (!thread || !thread.messages) return;
-          const firstMsg = thread.messages[0];
-          const headers = firstMsg.payload.headers;
-          const labelIds = firstMsg.labelIds || [];
-          
-          const from = headers.find(h => h.name === "From")?.value || "Unknown";
-          const subject = headers.find(h => h.name === "Subject")?.value || "(No Subject)";
-          
-          const match = from.match(/^(.*?)\s*<([^>]+)>$/) || [null, from, from];
-          const name = (match[1] || match[2]).replace(/["']/g, '');
-          const email = match[2];
-
-          // Smart category detection via Gmail Labels
-          let category = "Updates";
-          if (labelIds.includes("CATEGORY_PROMOTIONS")) category = "Promotions";
-          else if (labelIds.includes("CATEGORY_SOCIAL")) category = "Social";
-          else if (labelIds.includes("CATEGORY_FORUMS")) category = "Forums";
-          else if (labelIds.includes("CATEGORY_PERSONAL")) category = "Personal";
-          
-          // Custom Work detection if it's not a generic category
-          if (category === "Updates") {
-            const domain = email.split('@')[1]?.toLowerCase() || "";
-            if (["github.com", "atlassian.net", "jira.com", "slack.com", "microsoft.com", "google.com"].includes(domain)) {
-              category = "Work";
-            }
-          }
-
-          if (!sendersMap.has(email)) {
-            sendersMap.set(email, {
-              id: email,
-              name: name,
-              email: email,
-              count: 1,
-              lastMsg: subject,
-              category: category,
-              avatar: name.substring(0, 1).toUpperCase()
-            });
-          } else {
-            const existing = sendersMap.get(email);
-            existing.count++;
-            // If we found a more specific category in another thread, update it
-            if (existing.category === "Updates" && category !== "Updates") {
-              existing.category = category;
-            }
-          }
-        });
-
-        // Sort by frequency (most emails first)
-        const sortedChats = Array.from(sendersMap.values()).sort((a, b) => b.count - a.count);
-        sendResponse({ chats: sortedChats });
-
-      } catch (err) {
-        console.error("❌ Gmail Fetch Error:", err);
-        sendResponse({ error: "fetch_error", message: err.message });
-      }
-    });
-    return true;
-  }
-
-  // ──────────────────────────────────────────────────────────
-  // 💬 WHATSAPP CHATS — Cache scraped chats from content script
-  // ──────────────────────────────────────────────────────────
-  if (message.type === "WHATSAPP_CHATS") {
-    const { chats, timestamp } = message;
-    chrome.storage.local.set({ whatsappChats: { chats, at: timestamp } });
-    console.log(`💬 WhatsApp chats cached: ${chats.length} chats`);
-    return false;
-  }
-
-  // GET_WHATSAPP_CHATS — popup or dashboard requests cached chats
-  if (message.type === "GET_WHATSAPP_CHATS") {
-    // First try to ask any open WhatsApp Web tab directly for freshest data
-    chrome.tabs.query({ url: ["*://web.whatsapp.com/*", "*://www.whatsapp.com/*"] }, (tabs) => {
-      // Filter out any tabs that might not be fully loaded
-      const waTabs = tabs.filter(t => t.url && t.url.includes("web.whatsapp.com"));
-      
-      if (waTabs.length > 0) {
-        console.log(`🔍 Attempting live scrape on WhatsApp tab: ${waTabs[0].id}`);
-        chrome.tabs.sendMessage(waTabs[0].id, { type: "GET_WHATSAPP_CHATS" }, (resp) => {
-          if (chrome.runtime.lastError) {
-            console.warn("⚠️ Live scrape failed:", chrome.runtime.lastError.message);
-            // Fall back to cached if messaging fails
-            chrome.storage.local.get("whatsappChats", (d) => {
-              sendResponse({ 
-                chats: d.whatsappChats?.chats || [], 
-                source: "cache",
-                error: "could_not_connect_to_tab" 
-              });
-            });
-            return;
-          }
-
-          if (resp?.chats?.length > 0) {
-            console.log(`✅ Live scrape successful: ${resp.chats.length} chats`);
-            sendResponse({ chats: resp.chats, source: "live" });
-          } else {
-            console.log("📍 Tab returned empty chats, using cache");
-            chrome.storage.local.get("whatsappChats", (d) => {
-              sendResponse({ chats: d.whatsappChats?.chats || [], source: "cache" });
-            });
-          }
-        });
-      } else {
-        // No WA tab open → return cached
-        console.log("📍 No open WhatsApp tab found, returning cache");
-        chrome.storage.local.get("whatsappChats", (d) => {
-          sendResponse({ chats: d.whatsappChats?.chats || [], source: "cache", noTab: true });
-        });
-      }
-    });
-    return true; // async sendResponse
   }
 
   // Page unload report
@@ -604,77 +363,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("📦 Page closed:", message.data?.url, `(${message.data?.timeSpentSec}s)`);
     return false;
   }
-
-  // ============================================================
-  // 🔕 PLATFORM MUTE UPDATE (from dashboard)
-  // Sent by ManagePage sub-pages: mutes matching tabs, stores rules
-  // ============================================================
-  if (message.type === "PLATFORM_MUTE_UPDATE") {
-    const { platform, config } = message;
-    if (!platform) return false;
-
-    // Store mute config in local storage
-    chrome.storage.local.get("platformMuteRules", (data) => {
-      const rules = data.platformMuteRules || {};
-      rules[platform] = { ...(rules[platform] || {}), ...config, updatedAt: Date.now() };
-      chrome.storage.local.set({ platformMuteRules: rules });
-    });
-
-    // If muteAll or muteTabAudio is being set, mute/unmute tab audio
-    if (typeof config.muteAll !== "undefined") {
-      applyPlatformMuteToTabs(platform, config.muteAll);
-    }
-    if (typeof config.muteTabAudio !== "undefined") {
-      applyPlatformMuteToTabs(platform, config.muteTabAudio);
-    }
-
-    // Block/unblock push notifications for the platform's URLs
-    if (typeof config.blockPushNotifications !== "undefined" ||
-        typeof config.muteAll !== "undefined") {
-      const domains = PLATFORM_DOMAINS[platform] || [];
-      if (chrome.contentSettings && chrome.contentSettings.notifications) {
-        const shouldBlock = config.blockPushNotifications || config.muteAll;
-        domains.forEach((domain) => {
-          const pattern = `https://${domain}/*`;
-          if (shouldBlock) {
-            chrome.contentSettings.notifications.set({
-              primaryPattern: pattern,
-              setting: "block",
-            });
-          } else {
-            chrome.contentSettings.notifications.set({
-              primaryPattern: pattern,
-              setting: "ask",
-            });
-          }
-        });
-      }
-    }
-
-    console.log(`🔕 Platform mute rule updated: [${platform}]`, config);
-    sendResponse({ success: true, platform, config });
-    return true;
-  }
 });
 
 // Initialize on install
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({ focusMode: false, platformMuteRules: {} });
+  chrome.storage.local.set({ focusMode: false });
   if (chrome.contentSettings && chrome.contentSettings.notifications) {
     chrome.contentSettings.notifications.clear({});
   }
   console.log("✅ Context-Aware Productivity Assistant v2.0 installed!");
-});
-
-// On startup: restore platform mute states
-chrome.runtime.onStartup.addListener(() => {
-  chrome.storage.local.get("platformMuteRules", (data) => {
-    const rules = data.platformMuteRules || {};
-    Object.entries(rules).forEach(([platform, config]) => {
-      if (config.muteAll || config.muteTabAudio) {
-        applyPlatformMuteToTabs(platform, true);
-      }
-    });
-    console.log("🔄 Platform mute rules restored on startup:", Object.keys(rules));
-  });
 });

@@ -9,19 +9,10 @@
     "notifications",
     "storage",
     "webNavigation",
-    "contentSettings",
-    "identity"
+    "contentSettings"
   ],
-  "oauth2": {
-    "client_id": "REPLACE_WITH_YOUR_CLIENT_ID.apps.googleusercontent.com",
-    "scopes": [
-      "https://www.googleapis.com/auth/gmail.readonly",
-      "https://www.googleapis.com/auth/gmail.metadata"
-    ]
-  },
   "host_permissions": [
     "http://localhost:5001/*",
-    "https://www.googleapis.com/*",
     "<all_urls>"
   ],
   "background": {

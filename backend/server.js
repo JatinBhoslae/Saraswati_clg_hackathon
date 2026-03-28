@@ -18,7 +18,6 @@ const logRoutes = require("./routes/logRoutes");
 const statsRoutes = require("./routes/statsRoutes");
 const focusRoutes = require("./routes/focusRoutes");
 const settingsRoutes = require("./routes/settingsRoutes");
-const notificationRoutes = require("./routes/notificationRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -58,58 +57,6 @@ app.use("/api", logRoutes(store));
 app.use("/api", statsRoutes(store));
 app.use("/api", focusRoutes(store));
 app.use("/api", settingsRoutes(store));
-app.use("/api/notifications", notificationRoutes(() => userContext));
-
-// -----------------------------------------------------------
-// 🧠 GLOBAL CONTEXT STORE (Context Engine)
-// -----------------------------------------------------------
-let userContext = {
-  activityLevel: 'Idle',
-  inMeeting: false,
-  deepWork: false,
-  currentTask: 'Unknown',
-  lastUpdated: new Date().toISOString()
-};
-
-app.post("/api/context", (req, res) => {
-  const { activityLevel, inMeeting, deepWork, currentTask } = req.body;
-  userContext = {
-    ...userContext,
-    activityLevel: activityLevel !== undefined ? activityLevel : userContext.activityLevel,
-    inMeeting: inMeeting !== undefined ? inMeeting : userContext.inMeeting,
-    deepWork: deepWork !== undefined ? deepWork : userContext.deepWork,
-    currentTask: currentTask !== undefined ? currentTask : userContext.currentTask,
-    lastUpdated: new Date().toISOString()
-  };
-  console.log("🧠 Context Engine Updated:", userContext);
-  res.json({ success: true, context: userContext });
-});
-
-app.get("/api/context", (req, res) => {
-  res.json({ context: userContext });
-});
-
-// -----------------------------------------------------------
-// 🔕 PLATFORM MUTE RULES (in-memory, dashboard ↔ extension bridge)
-// -----------------------------------------------------------
-const muteRules = {};
-
-app.post("/api/mute-rules", (req, res) => {
-  const { platform, config } = req.body;
-  if (!platform) return res.status(400).json({ error: "platform required" });
-  muteRules[platform] = { ...(muteRules[platform] || {}), ...config, updatedAt: new Date().toISOString() };
-  console.log(`🔕 Mute rule [${platform}] updated:`, config);
-  res.json({ success: true, platform, rules: muteRules[platform] });
-});
-
-app.get("/api/mute-rules", (req, res) => {
-  res.json({ rules: muteRules });
-});
-
-app.get("/api/mute-rules/:platform", (req, res) => {
-  const { platform } = req.params;
-  res.json({ platform, rules: muteRules[platform] || {} });
-});
 
 // -----------------------------------------------------------
 // ❌ 404 Handler
