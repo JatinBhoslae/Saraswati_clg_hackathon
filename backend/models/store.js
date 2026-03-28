@@ -7,18 +7,21 @@
 // ============================================================
 
 const MAX_LOGS = 1000; // Prevent memory overflow
-
-// -----------------------------------------------------------
-// 📋 Activity Logs Storage
-// -----------------------------------------------------------
-let activityLogs = [];
-
-// -----------------------------------------------------------
-// 🎯 Focus Mode State
-// -----------------------------------------------------------
-let focusMode = false;
-let focusModeStartTime = null;
-let totalFocusTimeMs = 0;
+ 
+ // -----------------------------------------------------------
+ // 📋 Activity Logs Storage
+ // -----------------------------------------------------------
+ let activityLogs = [];
+ 
+ // -----------------------------------------------------------
+ // 🎯 Focus Mode State
+ // -----------------------------------------------------------
+ let focusMode = false;
+ let focusModeStartTime = null;
+ let totalFocusTimeMs = 0;
+ let activePresetId = null;
+ let mutedApps = [];
+ let mutedUsersByPreset = {};  // shape: { work: { whatsapp: ["Rahul"], gmail: ["boss@work.com"] }, home: {} }
 
 // -----------------------------------------------------------
 // 🛑 Custom Blocked Sites
@@ -34,7 +37,9 @@ let customBlockedSites = [
 // 💬 Platform Specific Data
 // -----------------------------------------------------------
 let whatsappChats = [];
+let mutedWhatsAppChatNames = []; // Global list of chat names muted from dashboard
 let gmailEmails = [];
+
 
 // -----------------------------------------------------------
 // 🏆 Gamification Engine State
@@ -140,6 +145,18 @@ const store = {
   getWhatsAppChats() {
     return whatsappChats;
   },
+  getMutedWhatsAppChats() {
+    return mutedWhatsAppChatNames;
+  },
+  muteWhatsAppChat(name) {
+    if (!mutedWhatsAppChatNames.includes(name)) {
+      mutedWhatsAppChatNames.push(name);
+    }
+  },
+  unmuteWhatsAppChat(name) {
+    mutedWhatsAppChatNames = mutedWhatsAppChatNames.filter(n => n !== name);
+  },
+
   setGmailEmails(emails) {
     gmailEmails = emails;
   },
@@ -202,6 +219,31 @@ const store = {
     customBlockedSites = customBlockedSites.filter((s) => s !== site);
   },
 
+  // Preset
+  getActivePreset() { return activePresetId; },
+  setActivePreset(id) { activePresetId = id; },
+
+  // Muted Apps
+  getMutedApps() { return mutedApps; },
+  setMutedApps(arr) { mutedApps = Array.isArray(arr) ? arr : []; },
+
+  // Muted Users per Preset
+  getMutedUsers(presetId) {
+    return mutedUsersByPreset[presetId] || {};
+  },
+  addMutedUser(presetId, app, identifier) {
+    if (!mutedUsersByPreset[presetId]) mutedUsersByPreset[presetId] = {};
+    if (!mutedUsersByPreset[presetId][app]) mutedUsersByPreset[presetId][app] = [];
+    if (!mutedUsersByPreset[presetId][app].includes(identifier)) {
+      mutedUsersByPreset[presetId][app].push(identifier);
+    }
+  },
+  removeMutedUser(presetId, app, identifier) {
+    if (mutedUsersByPreset[presetId]?.[app]) {
+      mutedUsersByPreset[presetId][app] = mutedUsersByPreset[presetId][app].filter(u => u !== identifier);
+    }
+  },
+
   // === UTILS ===
 
   /** Reset everything (useful for testing) */
@@ -211,8 +253,10 @@ const store = {
     focusModeStartTime = null;
     totalFocusTimeMs = 0;
     customBlockedSites = [];
+    activePresetId = null;
+    mutedApps = [];
+    mutedUsersByPreset = {};
   },
 };
 
 module.exports = store;
-

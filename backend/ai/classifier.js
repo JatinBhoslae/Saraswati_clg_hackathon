@@ -389,6 +389,20 @@ function generateSmartSuggestions(stats) {
 }
 
 // -----------------------------------------------------------
+// 6️⃣ analyzeUrgency(text)
+// Simple heuristic for urgency detection in snippets
+// -----------------------------------------------------------
+function analyzeUrgency(text) {
+  if (!text) return false;
+  const urgentKeywords = [
+    "urgent", "immediately", "asap", "call me", "emergency", 
+    "quick question", "help", "important", "deadline", "fast"
+  ];
+  const lowerText = text.toLowerCase();
+  return urgentKeywords.some(kw => lowerText.includes(kw));
+}
+
+// -----------------------------------------------------------
 // 📤 EXPORTS
 // -----------------------------------------------------------
 module.exports = {
@@ -397,5 +411,6 @@ module.exports = {
   generateSummary,
   calculateProductivityScore,
   generateSmartSuggestions,
+  analyzeUrgency,
   SITE_RULES,
 };

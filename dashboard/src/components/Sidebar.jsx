@@ -6,8 +6,9 @@ import {
   Zap, 
   BarChart3, 
   Shield, 
-  Target,
-  Trophy
+  Target, 
+  Trophy, 
+  Sparkles 
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -15,11 +16,12 @@ const Sidebar = ({ gamification = { xp: 240, level: 3, dailyStreak: 5, nextLevel
   const navItems = [
     { title: "Dashboard", path: "/dashboard", icon: <LayoutDashboard size={20} /> },
     { title: "Analytics", path: "/analytics", icon: <BarChart3 size={20} /> },
+    { title: "Presets", path: "/presets", icon: <Sparkles size={20} /> },
     { title: "Manage", path: "/manage", icon: <Shield size={20} /> },
     { title: "Settings", path: "/settings", icon: <Settings size={20} /> },
   ];
 
-  const levelProgress = (gamification.xp / gamification.nextLevelXp) * 100;
+  const levelProgress = (gamification.xp / (gamification.nextLevelXp || 1000)) * 100;
 
   return (
     <aside className="w-64 h-screen bg-background border-r border-border fixed left-0 top-0 z-50 flex flex-col p-6 isolate">
