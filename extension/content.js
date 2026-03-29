@@ -13,6 +13,7 @@
 
   let focusModeActive = false;
   let mutedWhatsAppChats = []; // Local cache
+  let mutedInstagramChats = []; // 📸 NEW: Local cache for IG
   let contextAlive = true;
 
 
@@ -136,14 +137,16 @@
   // -----------------------------------------------------------
   // 📡 BROADCAST FOCUS STATE TO PAGE CONTEXT
   // -----------------------------------------------------------
-  function broadcastUpdates(isActive, blockedSites = [], mutedWhatsAppChats = []) {
+  // 📡 BROADCAST FOCUS STATE TO PAGE CONTEXT
+  function broadcastUpdates(isActive, blockedSites = [], mutedWhatsAppChats = [], mutedInstagramChats = []) {
     try {
       window.dispatchEvent(
         new CustomEvent("__pa_update__", { 
           detail: { 
             on: isActive, 
             blockedSites,
-            mutedWhatsAppChats
+            mutedWhatsAppChats,
+            mutedInstagramChats
           } 
         })
       );
@@ -166,7 +169,8 @@
     if (response) {
       focusModeActive = response.focusMode || false;
       mutedWhatsAppChats = response.mutedWhatsAppChats || [];
-      broadcastUpdates(focusModeActive, response.blockedSites, mutedWhatsAppChats);
+      mutedInstagramChats = response.mutedInstagramChats || []; // 📸 NEW
+      broadcastUpdates(focusModeActive, response.blockedSites, mutedWhatsAppChats, mutedInstagramChats);
       
       // Also get keywords for the smart filter
       safeSendMessage({ type: "GET_EXTENSION_STATE" }, function (extResponse) {
@@ -194,9 +198,18 @@
           cleanup();
           return;
         }
-        if (message.type === "FOCUS_MODE_CHANGED" || message.type === "EXTENSION_STATE_CHANGED") {
-          focusModeActive = message.focusMode;
-          broadcastUpdates(focusModeActive, message.blockedSites || [], message.mutedWhatsAppChats || []);
+        if (message.type === "FOCUS_MODE_CHANGED" || message.type === "EXTENSION_STATE_CHANGED" || message.type === "MUTE_LIST_UPDATE") {
+          if (typeof message.focusMode !== 'undefined') focusModeActive = message.focusMode;
+          
+          broadcastUpdates(
+            focusModeActive, 
+            message.blockedSites || [], 
+            message.mutedWhatsAppChats || (typeof mutedWhatsAppChats !== 'undefined' ? mutedWhatsAppChats : []),
+            message.mutedInstagramChats || []
+          );
+
+          if (message.mutedWhatsAppChats) mutedWhatsAppChats = message.mutedWhatsAppChats;
+
           if (message.priorityKeywords) {
             broadcastKeywords(message.priorityKeywords);
           }
@@ -743,15 +756,37 @@
         const previewNode = row.querySelector('span[style*="color: rgb(142, 142, 142)"]'); // grey text
         
         if (nameNode) {
+          const name = nameNode.innerText;
+          const isMuted = mutedInstagramChats.includes(name);
+
           chats.push({
-            id: `ig-${nameNode.innerText.replace(/\s+/g, '-').toLowerCase()}`,
-            name: nameNode.innerText,
-            displayName: nameNode.innerText,
+            id: `ig-${name.replace(/\s+/g, '-').toLowerCase()}`,
+            name: name,
+            displayName: name,
             lastAction: previewNode ? previewNode.innerText : "Active thread",
-            count: 0, // Injected via observer if needed
-            muted: false, 
+            count: 0, 
+            muted: isMuted, 
             lastSynced: new Date().toISOString()
           });
+
+          // Apply visual mute to the DOM element
+          if (isMuted) {
+            row.style.opacity = "0.3";
+            row.style.filter = "grayscale(1) contrast(0.8)";
+            row.style.transition = "all 0.4s ease";
+            if (!row.querySelector(".saraswati-mute-badge")) {
+                const badge = document.createElement("div");
+                badge.className = "saraswati-mute-badge";
+                badge.innerText = "🔇 SARASWATI MUTED";
+                badge.style.cssText = "font-size: 8px; font-weight: 900; color: #10b981; background: rgba(16,185,129,0.1); padding: 2px 6px; border-radius: 4px; margin-top: 4px; width: fit-content; border: 1px solid rgba(16,185,129,0.2); pointer-events: none;";
+                nameNode.parentElement.appendChild(badge);
+            }
+          } else {
+            row.style.opacity = "1";
+            row.style.filter = "none";
+            const badge = row.querySelector(".saraswati-mute-badge");
+            if (badge) badge.remove();
+          }
         }
       } catch (e) {}
     });

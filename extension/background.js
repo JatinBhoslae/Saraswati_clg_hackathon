@@ -200,12 +200,9 @@ async function syncFocusState() {
           tabs.forEach(tab => {
             chrome.tabs.sendMessage(tab.id, {
               type: "MUTE_LIST_UPDATE",
-              mutedNames: _mutedWhatsAppChats
+              mutedWhatsAppChats: _mutedWhatsAppChats
             }, () => {
-                const error = chrome.runtime.lastError;
-                if (error) {
-                    // console.warn(`Silent Sync: Tab ${tab.id} not ready yet.`);
-                }
+                const error = chrome.runtime.lastError; if (error) {}
             });
           });
         });
@@ -225,13 +222,9 @@ async function syncFocusState() {
           tabs.forEach(tab => {
             chrome.tabs.sendMessage(tab.id, {
               type: "MUTE_LIST_UPDATE",
-              platform: "instagram",
-              mutedNames: _mutedInstagramChats
+              mutedInstagramChats: _mutedInstagramChats
             }, () => {
-                const error = chrome.runtime.lastError;
-                if (error) {
-                    // console.warn(`Silent Sync: Tab ${tab.id} not ready yet.`);
-                }
+                const error = chrome.runtime.lastError; if (error) {}
             });
           });
         });
@@ -535,7 +528,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({
         focusMode: data.focusMode || false,
         blockedSites: data.customBlockedSites || [],
-        mutedWhatsAppChats: _mutedWhatsAppChats
+        mutedWhatsAppChats: _mutedWhatsAppChats,
+        mutedInstagramChats: _mutedInstagramChats
       });
     });
     return true; // Keep message channel open for async response
