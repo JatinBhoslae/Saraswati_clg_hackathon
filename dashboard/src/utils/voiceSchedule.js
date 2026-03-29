@@ -30,8 +30,9 @@ function normalizeTime(timeStr, isEnd = false, startHour = null) {
   if (t.includes("morning")) return "09:00";
   if (t.includes("evening")) return "18:00";
   
-  // Extract number and modifier
-  const match = t.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  // Extract number and modifier (Normalize dots like a.m. to am)
+  const cleanT = t.replace(/\./g, '');
+  const match = cleanT.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
   if (!match) return null;
 
   let hour = parseInt(match[1]);
@@ -56,12 +57,29 @@ function normalizeTime(timeStr, isEnd = false, startHour = null) {
 }
 
 /**
+ * Converts verbal numbers to digits (e.g., "ten" -> "10")
+ * Vital for SpeechRecognition inconsistencies
+ */
+function wordsToDigits(text) {
+  const map = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "ten": "10", "eleven": "11", "twelve": "12", "noon": "12", "midnight": "00"
+  };
+  let output = text;
+  Object.keys(map).forEach(word => {
+    output = output.replace(new RegExp(`\\b${word}\\b`, 'gi'), map[word]);
+  });
+  return output;
+}
+
+/**
  * Main NLP Parser
  * Transcript -> { startTime, endTime, days, label, priorityKeywords }
  * (Returns ONLY identified fields to avoid hardcoded placeholders)
  */
 export function parseScheduleCommand(text) {
-  const input = text.toLowerCase();
+  const input = wordsToDigits(text.toLowerCase()).replace(/\./g, '');
   const result = { priorityKeywords: [] };
 
   // 1. IMPROVED TIME EXTRACTION (Decoupled Start/End)
