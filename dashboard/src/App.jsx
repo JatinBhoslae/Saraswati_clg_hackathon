@@ -236,11 +236,12 @@ function App() {
                         delay={0.2}
                       />
                       <StatsCard 
-                        title="Distractions Blocked" 
-                        value={stats.blocked} 
+                        title="Total Distractions" 
+                        value={stats.distraction} 
                         icon={<ShieldAlert className="text-rose-400" size={24} />} 
                         gradient="from-rose-500 to-orange-500" 
                         delay={0.3}
+                        subValue={`${stats.blocked} intercepted by shield`}
                       />
                       <StatsCard 
                         title="Productivity Score" 

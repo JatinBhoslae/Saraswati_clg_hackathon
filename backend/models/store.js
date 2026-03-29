@@ -19,7 +19,7 @@ const {
   InstagramChat
 } = require("./db");
 
-const MAX_LOGS = 1000; // Prevent memory overflow
+const MAX_LOGS = 5000; // Expanded from 1000 to prevent 'stuck' analytics while guarding memory
  
  // -----------------------------------------------------------
  // 📋 Activity Logs Storage

@@ -2,7 +2,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import GlassCard from "./GlassCard";
 
-const StatsCard = ({ title, value, icon, gradient, pulse = false, delay = 0 }) => {
+const StatsCard = ({ title, value, icon, gradient, subValue, pulse = false, delay = 0 }) => {
   return (
     <GlassCard className={`relative overflow-hidden group`}>
       {/* Background Accent Glow */}
@@ -11,10 +11,13 @@ const StatsCard = ({ title, value, icon, gradient, pulse = false, delay = 0 }) =
       <div className="flex items-center justify-between relative z-10">
         <div className="space-y-1">
           <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">{title}</p>
-          <h3 className="text-3xl font-extrabold text-white tracking-tighter tabular-nums flex items-baseline gap-1">
-            {value}
-            {title.includes("Mins") && <span className="text-xs font-bold text-slate-500 uppercase">min</span>}
-          </h3>
+          <div className="flex flex-col">
+            <h3 className="text-3xl font-extrabold text-white tracking-tighter tabular-nums flex items-baseline gap-1">
+              {value}
+              {title.includes("Mins") && <span className="text-xs font-bold text-slate-500 uppercase">min</span>}
+            </h3>
+            {subValue && <span className="text-[10px] font-bold text-emerald-400/80 uppercase tracking-widest italic mt-1 leading-none">{subValue}</span>}
+          </div>
         </div>
         
         <motion.div 
