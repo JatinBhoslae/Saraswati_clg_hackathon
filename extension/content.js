@@ -593,11 +593,19 @@
         await new Promise(r => setTimeout(r, 600));
 
         // 4. Find the "Mute" menu item
-        const menuItems = Array.from(document.querySelectorAll("div[role='button'], li, [role='listitem']"));
+        const menuItems = Array.from(document.querySelectorAll("div[role='button'], li, [role='listitem'], div[role='menuitem'], [aria-label]"));
+        
         let muteOption = menuItems.find(i => {
-            const text = i.innerText.toLowerCase();
+            const text = (i.innerText || "").toLowerCase();
             return text.includes("mute") && !text.includes("unmute");
         });
+
+        // 🔍 RECOVERY: Check if it's already muted
+        const alreadyMuted = menuItems.some(i => (i.innerText || "").toLowerCase().includes("unmute"));
+        if (alreadyMuted && !muteOption) {
+            console.log("💎 [Automation] Chat is already muted. Nothing to do.");
+            return;
+        }
 
         if (muteOption) {
             console.log("✅ [Automation] Found Mute option, clicking...");
@@ -608,13 +616,10 @@
 
             // 6. Select "8 hours" (User's preferred default)
             const labels = Array.from(document.querySelectorAll("label, span, div"));
-            const eightHoursBtn = labels.find(l => l.innerText.toLowerCase().includes("8 hours"));
-            const alwaysBtn = labels.find(l => {
-                const text = l.innerText.toLowerCase();
-                return text === "always" || text.includes("1 year") || text === "8 hours";
+            const durationBtn = labels.find(l => {
+                const text = (l.innerText || "").toLowerCase();
+                return text.includes("8 hours") || text.includes("always") || text.includes("1 year") || text.includes("8 h");
             });
-
-            const durationBtn = eightHoursBtn || alwaysBtn;
 
             if (durationBtn) {
                 console.log(`✅ [Automation] Selecting duration: "${durationBtn.innerText}"...`);
@@ -623,10 +628,10 @@
             }
 
             // 7. Click confirm
-            const buttons = Array.from(document.querySelectorAll("button"));
+            const buttons = Array.from(document.querySelectorAll("button, div[role='button']"));
             const confirmBtn = buttons.find(b => {
-                const text = b.innerText.toLowerCase();
-                return text === "mute notifications" || text === "mute";
+                const text = (b.innerText || "").toLowerCase();
+                return text === "mute notifications" || text === "mute" || text === "mudo" || text.includes("confirm");
             });
 
             if (confirmBtn) {
