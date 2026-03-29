@@ -3,64 +3,74 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Site Blocked — Focus Mode</title>
+  <title>Deep Focus Protected — Productivity Assistant</title>
+  
+  <!-- 🛡️ Fix Manifest Icon Error: Define a clean local icon for the blocked state -->
+  <link rel="icon" type="image/png" href="icons/icon48.png">
   <link rel="stylesheet" href="blocked.css">
+  
+  <!-- 🧩 Premium Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="blocked-container">
-    <!-- Animated background particles -->
-    <div class="particles">
-      <div class="particle"></div>
-      <div class="particle"></div>
-      <div class="particle"></div>
-      <div class="particle"></div>
-      <div class="particle"></div>
-    </div>
+  <div class="zen-layout">
+    <!-- 🌫️ Dynamic Background Glows -->
+    <div class="glow glow-1"></div>
+    <div class="glow glow-2"></div>
 
-    <!-- Main content -->
-    <div class="blocked-content">
-      <div class="shield-icon">🛡️</div>
-      <h1>Site Blocked</h1>
-      <p class="blocked-url" id="blockedUrl">This site is blocked during Focus Mode</p>
-      <div class="divider"></div>
-      <p class="motivation" id="motivation">Stay focused. You're doing great! 💪</p>
-      <div class="tips">
-        <h3>💡 Instead, try:</h3>
-        <ul>
-          <li>🎯 Working on your current task</li>
-          <li>📚 Learning something new on Coursera</li>
-          <li>💻 Solving a problem on LeetCode</li>
-          <li>🧘 Taking a mindful 5-minute break</li>
-        </ul>
+    <main class="shield-card">
+      <div class="shield-header">
+        <div class="shield-orb">
+          <div class="shield-inner">🛡️</div>
+        </div>
+        <div class="badge-row">
+            <span class="shield-badge">Focus Active</span>
+            <span class="shield-badge priority">Bypass Denied</span>
+        </div>
       </div>
-      <button class="back-btn" onclick="history.back()">← Go Back</button>
-    </div>
+
+      <div class="content">
+        <h1 id="title">Distraction Neutralized</h1>
+        <p class="site-tag" id="blockedUrl">Target Site Blocked</p>
+        
+        <div class="divider"></div>
+        
+        <p class="wisdom" id="motivation">"The secret of focus is to say no to distractions."</p>
+
+        <div class="recovery-box">
+          <h2>🧘 Instead, try a Zen Action:</h2>
+          <div class="action-grid">
+            <div class="action-item">
+               <span class="icon">🎯</span>
+               <p>Finish one sub-task</p>
+            </div>
+            <div class="action-item">
+               <span class="icon">💧</span>
+               <p>Drink some water</p>
+            </div>
+            <div class="action-item">
+               <span class="icon">🧠</span>
+               <p>Learn 3 new words</p>
+            </div>
+            <div class="action-item">
+               <span class="icon">🚀</span>
+               <p>10 pushups / deep breath</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer-actions">
+           <button class="primary-btn" onclick="history.back()">
+             <span class="btn-icon">←</span> Return to Productivity
+           </button>
+           <button class="secondary-btn" onclick="window.close()">Close Distraction</button>
+        </div>
+      </div>
+    </main>
   </div>
 
-  <script>
-    // Show which site was blocked
-    const params = new URLSearchParams(window.location.search);
-    const url = params.get('url');
-    if (url) {
-      try {
-        const hostname = new URL(url).hostname.replace('www.', '');
-        document.getElementById('blockedUrl').textContent = `${hostname} is blocked during Focus Mode`;
-      } catch(e) {}
-    }
-
-    // Random motivational quotes
-    const quotes = [
-      "Stay focused. You're doing great! 💪",
-      "Success is the sum of small efforts, repeated. 🌟",
-      "Don't watch the clock; do what it does — keep going. ⏰",
-      "The secret of getting ahead is getting started. 🚀",
-      "You're stronger than the distraction. 🧠",
-      "Focus on being productive, not busy. 🎯",
-      "One hour of focused work > three hours of distracted work. ⚡",
-      "Your future self will thank you. 🙏"
-    ];
-    document.getElementById('motivation').textContent = 
-      quotes[Math.floor(Math.random() * quotes.length)];
-  </script>
+  <script src="blocked.js"></script>
 </body>
 </html>

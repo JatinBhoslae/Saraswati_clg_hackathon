@@ -24,6 +24,7 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const presetRoutes = require("./routes/presetRoutes");
 const scheduleRoutes = require("./routes/scheduleRoutes");
 const calendarRoutes = require("./routes/calendarRoutes");
+const instagramRoutes = require("./routes/instagramRoutes"); // 🛡️ NEW
 const app = express();
 const PORT = process.env.PORT || 5001;
  
@@ -71,6 +72,7 @@ app.use("/api/notifications", notificationRoutes(store));
 app.use("/api/presets", presetRoutes(store));
 app.use("/api/schedule", scheduleRoutes(store));
 app.use("/api/calendar", calendarRoutes(store));
+app.use("/api/instagram", instagramRoutes); // 🛡️ NEW
 
 // -----------------------------------------------------------
 // ❌ 404 Handler

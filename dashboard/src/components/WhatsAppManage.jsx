@@ -2,15 +2,25 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 
 const API_URL = "http://localhost:5001/api";
-import { MessageSquare, ExternalLink, ShieldCheck, Activity, Search, RefreshCw, AlertCircle } from "lucide-react";
+import { MessageSquare, ExternalLink, ShieldCheck, Activity, Search, RefreshCw, AlertCircle, Clock, Calendar, Check, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import clsx from "clsx";
 
 const WhatsAppManage = () => {
     const [chats, setChats] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedIds, setSelectedIds] = useState([]);
     const [mutedIds, setMutedIds] = useState([]); // Persistent in local storage for now
-    const [filter, setFilter] = useState("all"); // 'all', 'personal', 'groups'
+    const [filter, setFilter] = useState("all"); 
+    const [schedulingChat, setSchedulingChat] = useState(null); // Chat name being scheduled
+    const [tempSchedule, setTempSchedule] = useState({
+        startTime: "09:00",
+        endTime: "18:00",
+        days: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+        type: "daily"
+    });
+
+    const dayOrder = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
     // Load muted names from Backend on mount
     useEffect(() => {
@@ -64,17 +74,47 @@ const WhatsAppManage = () => {
                 await axios.post(`${API_URL}/whatsapp/unmute`, { name });
                 setMutedIds(prev => prev.filter(n => n !== name));
             } else {
-                await axios.post(`${API_URL}/whatsapp/mute`, { name });
-                setMutedIds(prev => [...prev, name]);
-                
-                // 🤖 Fire automation event for the Chrome extension
-                window.dispatchEvent(new CustomEvent("__pa_automate_mute__", {
-                    detail: { name }
-                }));
+                // Open scheduling first instead of instant mute
+                setSchedulingChat(name);
             }
         } catch (err) {
             console.error("Mute toggle failed", err);
         }
+    };
+
+    const confirmScheduleMute = async () => {
+        try {
+            const name = schedulingChat;
+            await axios.post(`${API_URL}/whatsapp/mute`, { 
+                name,
+                muteStartTime: tempSchedule.startTime,
+                muteEndTime: tempSchedule.endTime,
+                muteDays: tempSchedule.days,
+                muteType: tempSchedule.type
+            });
+            
+            // 🔥 RECOVERY: Fetch latest active mutes from backend to ensure time-logic is considered
+            const res = await axios.get(`${API_URL}/whatsapp/muted`);
+            setMutedIds(res.data);
+            
+            setSchedulingChat(null);
+            
+            // 🤖 Automation event
+            window.dispatchEvent(new CustomEvent("__pa_automate_mute__", {
+                detail: { name }
+            }));
+        } catch (err) {
+            console.error("Scheduling failed", err);
+        }
+    };
+
+    const toggleMuteDay = (day) => {
+        setTempSchedule(prev => ({
+            ...prev,
+            days: prev.days.includes(day) 
+                ? prev.days.filter(d => d !== day) 
+                : [...prev.days, day]
+        }));
     };
 
 
@@ -208,12 +248,16 @@ const WhatsAppManage = () => {
                                 </div>
                             ) : (
                                 <AnimatePresence mode="popLayout">
-                                    {filteredChats.map((chat, i) => (
+                                    {filteredChats.map((chat, i) => {
+                                        const isActiveMute = mutedIds.includes(chat.name);
+                                        const isRuleSet = chat.isMuted;
+                                        
+                                        return (
                                         <motion.div 
                                             key={chat.id || i}
                                             initial={{ opacity: 0, scale: 0.98 }}
                                             animate={{ opacity: 1, scale: 1 }}
-                                            className={`p-6 hover:bg-white/[0.03] transition-all flex items-center gap-6 group cursor-default ${mutedIds.includes(chat.name) ? 'opacity-40 grayscale-[0.5]' : ''}`}
+                                            className={`p-6 hover:bg-white/[0.03] transition-all flex items-center gap-6 group cursor-default ${isActiveMute ? 'opacity-40 grayscale-[0.8]' : ''}`}
                                         >
                                             <input 
                                                 type="checkbox" 
@@ -223,7 +267,7 @@ const WhatsAppManage = () => {
                                                 className="w-5 h-5 rounded-lg bg-slate-800 border-white/10 text-emerald-500 focus:ring-emerald-500/20 cursor-pointer transition-all"
                                             />
                                             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-black shrink-0 transition-all shadow-inner border ${
-                                                chat.unread && !mutedIds.includes(chat.name)
+                                                chat.unread && !isActiveMute
                                                     ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 ring-4 ring-emerald-500/10' 
                                                     : 'bg-slate-800/80 text-slate-500 border-white/5'
                                             }`}>
@@ -232,16 +276,17 @@ const WhatsAppManage = () => {
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center justify-between mb-1.5">
                                                     <div className="flex items-center gap-3">
-                                                        <span className={`font-black text-base tracking-tight ${chat.unread && !mutedIds.includes(chat.id) ? 'text-white' : 'text-slate-300'}`}>
+                                                        <span className={`font-black text-base tracking-tight ${chat.unread && !isActiveMute ? 'text-white' : 'text-slate-300'}`}>
                                                             {chat.name}
-                                                            {mutedIds.includes(chat.name) && <span className="ml-2 text-slate-500 text-[10px] italic font-normal">(Muted)</span>}
+                                                            {isActiveMute && <span className="ml-2 text-rose-500 text-[10px] italic font-black uppercase tracking-widest">(Active Block)</span>}
+                                                            {!isActiveMute && isRuleSet && <span className="ml-2 text-emerald-500 text-[10px] italic font-black uppercase tracking-widest leading-none flex items-center gap-1"><Clock size={10} /> (Scheduled)</span>}
                                                         </span>
                                                         {chat.unread && !chat.isUrgent && !mutedIds.includes(chat.name) && (
                                                             <span className="px-2 py-0.5 bg-emerald-500 text-slate-900 text-[10px] font-black rounded-full shadow-lg shadow-emerald-500/30">
                                                                 NEW
                                                             </span>
                                                         )}
-                                                        {chat.isUrgent && !mutedIds.includes(chat.name) && (
+                                                        {chat.isUrgent && !isActiveMute && (
                                                             <span className="px-2 py-0.5 bg-rose-500 text-white text-[10px] font-black rounded-full shadow-lg shadow-rose-500/30 flex items-center gap-1.5 animate-pulse">
                                                                 <AlertCircle size={10} />
                                                                 URGENT
@@ -250,7 +295,7 @@ const WhatsAppManage = () => {
                                                     </div>
                                                     <span className="text-[11px] font-black text-slate-500 tracking-tighter tabular-nums uppercase">{chat.time}</span>
                                                 </div>
-                                                <p className={`text-sm line-clamp-1 leading-relaxed italic pr-4 ${chat.unread && !mutedIds.includes(chat.name) ? 'text-slate-300' : 'text-slate-500'}`}>
+                                                <p className={`text-sm line-clamp-1 leading-relaxed italic pr-4 ${chat.unread && !isActiveMute ? 'text-slate-300' : 'text-slate-500'}`}>
                                                     {chat.snippet}
                                                 </p>
                                             </div>
@@ -258,11 +303,11 @@ const WhatsAppManage = () => {
                                                 <button 
                                                     onClick={() => toggleMute(chat.name)}
                                                     className={`p-3 rounded-xl transition-all border ${
-                                                        mutedIds.includes(chat.name)
+                                                        isRuleSet || isActiveMute
                                                             ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                                                             : 'bg-slate-800 hover:bg-slate-700 text-slate-400 border-white/5'
                                                     }`}
-                                                    title={mutedIds.includes(chat.name) ? "Unmute" : "Mute"}
+                                                    title={isRuleSet || isActiveMute ? "Unmute" : "Mute"}
                                                 >
                                                     <ShieldCheck size={16} />
                                                 </button>
@@ -271,13 +316,115 @@ const WhatsAppManage = () => {
                                                 </button>
                                             </div>
                                         </motion.div>
-                                    ))}
+                                        );
+                                    })}
                                 </AnimatePresence>
                             )}
                         </div>
                     )}
                 </div>
             </div>
+
+            {/* 🕒 MODAL: MUTE SCHEDULE */}
+            <AnimatePresence>
+                {schedulingChat && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-xl">
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                            className="bg-slate-900 border border-white/5 w-full max-w-lg rounded-[40px] shadow-3xl relative isolate overflow-hidden flex flex-col"
+                        >
+                            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 z-10" />
+                            
+                            <div className="p-10 pb-6 flex justify-between items-center">
+                                <div>
+                                    <h2 className="text-3xl font-black text-white tracking-tighter">Precision Guard</h2>
+                                    <p className="text-emerald-500/80 text-[10px] font-black uppercase tracking-widest mt-1">Configure silence window for {schedulingChat}</p>
+                                </div>
+                                <button onClick={() => setSchedulingChat(null)} className="p-3 text-slate-500 hover:text-white transition-colors">
+                                    <X size={24} />
+                                </button>
+                            </div>
+
+                            <div className="p-10 pt-4 space-y-8">
+                                {/* Time Range */}
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div>
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-3">Mute Start</label>
+                                        <input 
+                                            type="time" 
+                                            value={tempSchedule.startTime}
+                                            onChange={e => setTempSchedule({...tempSchedule, startTime: e.target.value})}
+                                            className="w-full bg-slate-800/50 border border-white/5 rounded-2xl px-6 py-4 text-white focus:border-emerald-500/50 transition-all [color-scheme:dark]"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-3">Mute End</label>
+                                        <input 
+                                            type="time" 
+                                            value={tempSchedule.endTime}
+                                            onChange={e => setTempSchedule({...tempSchedule, endTime: e.target.value})}
+                                            className="w-full bg-slate-800/50 border border-white/5 rounded-2xl px-6 py-4 text-white focus:border-emerald-500/50 transition-all [color-scheme:dark]"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Recurring Days */}
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-4">Active Days</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {dayOrder.map(day => (
+                                            <button
+                                                key={day}
+                                                onClick={() => toggleMuteDay(day)}
+                                                className={clsx(
+                                                    "px-4 py-2 rounded-xl text-[11px] font-black transition-all border",
+                                                    tempSchedule.days.includes(day)
+                                                        ? "bg-emerald-500 border-emerald-400 text-slate-900 shadow-lg shadow-emerald-500/20"
+                                                        : "bg-slate-800 border-white/5 text-slate-500 hover:text-slate-300"
+                                                )}
+                                            >
+                                                {day.substring(0, 3)}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Type Selection */}
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-4">Guard Mode</label>
+                                    <div className="grid grid-cols-3 gap-3">
+                                        {['daily', 'weekly', 'once'].map(type => (
+                                            <button
+                                                key={type}
+                                                onClick={() => setTempSchedule({...tempSchedule, type})}
+                                                className={clsx(
+                                                    "py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border",
+                                                    tempSchedule.type === type
+                                                        ? "bg-slate-700 text-white border-white/20"
+                                                        : "bg-slate-800/50 text-slate-500 border-white/5 hover:bg-slate-800"
+                                                )}
+                                            >
+                                                {type}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="p-10 pt-4 border-t border-white/5 bg-white/[0.02]">
+                                <button 
+                                    onClick={confirmScheduleMute}
+                                    className="w-full py-5 rounded-3xl bg-emerald-500 text-slate-900 font-black text-sm uppercase tracking-widest shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all"
+                                >
+                                    Activate Precision Guard
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };

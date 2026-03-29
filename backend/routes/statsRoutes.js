@@ -16,7 +16,7 @@ module.exports = function (store) {
   // GET /api/stats — Get productivity statistics
   // Returns counts, charts data, score, suggestions
   // ---------------------------------------------------------
-  router.get("/stats", (req, res) => {
+  router.get("/stats", async (req, res) => {
     const logs = store.getLogs();
     const total = logs.length;
     const productive = logs.filter((l) => l.type === "productive").length;
@@ -90,6 +90,9 @@ module.exports = function (store) {
       (focusState.totalTimeMs + currentFocusMs) / 60000
     );
 
+    const activeMode = store.getCurrentMode();
+    const isEnforced = activeMode !== "Normal Mode";
+
     res.json({
       total,
       productive,
@@ -97,7 +100,8 @@ module.exports = function (store) {
       neutral,
       blocked,
       productivityScore,
-      focusMode: focusState.focusMode,
+      focusMode: isEnforced, // UI will reflect shield as active
+      activeMode: activeMode,
       focusTimeMinutes: totalFocusMinutes,
       activityByHour: Object.values(activityByHour).sort((a, b) =>
         a.hour.localeCompare(b.hour)
@@ -114,6 +118,14 @@ module.exports = function (store) {
       ],
       // Gamification stats
       gamification: store.getGamificationStats(),
+      googleInfo: {
+        linked: !!(await require('../models/db').GoogleAuth.findOne().lean()),
+        email: (await require('../models/db').GoogleAuth.findOne().lean())?.email || null
+      },
+      gmailInfo: {
+        linked: !!(await require('../models/db').GmailAuth.findOne().lean()),
+        email: (await require('../models/db').GmailAuth.findOne().lean())?.email || null
+      }
     });
   });
 

@@ -15,6 +15,7 @@
 // 📋 CONFIGURATION
 // -----------------------------------------------------------
 let _mutedWhatsAppChats = []; // Local cache of names
+let _mutedInstagramChats = []; // 📸 NEW: Local cache for IG
 const BACKEND_URL = "http://localhost:5001/api";
 
 // Site classification rules (mirrors backend AI module)
@@ -83,8 +84,20 @@ function classifySite(url) {
 // 🚦 DECISION ENGINE
 // Block only if focus mode is ON AND site is a distraction
 // -----------------------------------------------------------
-function shouldBlock(type, focusMode) {
-  return focusMode && type === "distraction";
+function shouldBlock(type, focusMode, activeMode = "") {
+  // If no focus mode, definitely don't block
+  if (!focusMode) return false;
+  
+  // 🛡️ STRATEGY UPDATE (User Request): 
+  // ONLY block sites if a specific PRESET or SCHEDULE is active (e.g., Office/Home/Work)
+  // If it's just a manual Focus Mode without a preset mode context, allow browsing.
+  const isManagedMode = activeMode && (
+    activeMode.includes("Office Mode") || 
+    activeMode.includes("Home Mode") || 
+    activeMode.includes("Work Mode")
+  );
+
+  return isManagedMode && type === "distraction";
 }
 
 // -----------------------------------------------------------
@@ -92,6 +105,18 @@ function shouldBlock(type, focusMode) {
 // -----------------------------------------------------------
 async function sendLog(logData) {
   try {
+    // 🔥 PERSISTENT LOCAL CACHE (Production Spec Step 12)
+    chrome.storage.local.get(["activityLogs", "sessionStats"], (result) => {
+      const logs = result.activityLogs || [];
+      logs.push(logData);
+      // Keep last 100 logs
+      const trimmed = logs.slice(-100);
+      chrome.storage.local.set({ 
+        activityLogs: trimmed,
+        sessionStats: { ...sessionStats, lastUpdate: Date.now() }
+      });
+    });
+
     await fetch(`${BACKEND_URL}/log`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -124,13 +149,29 @@ function showBlockedNotification(url) {
 // 📊 SESSION TRACKING
 // Track counts for smart notification summaries
 // -----------------------------------------------------------
+let localFocus = false; // Internal tracking for active shield state
+let autoReplyEnabled = true;
+let autoReplyCooldowns = {}; 
+const COOLDOWN_MS = 10 * 60 * 1000; 
+
 let sessionStats = {
   productive: 0,
   distraction: 0,
   neutral: 0,
   blocked: 0,
+  allowed: 0,
+  urgent: 0,
+  total: 0,
+  autoReplies: 0,
   startTime: Date.now(),
 };
+
+// 🚀 INITIALIZE STATE FROM PERSISTENT STORAGE (Production Spec Step 14)
+chrome.storage.local.get(["focusMode", "autoReplyEnabled"], (data) => {
+  if (typeof data.focusMode !== "undefined") localFocus = data.focusMode;
+  if (typeof data.autoReplyEnabled !== "undefined") autoReplyEnabled = data.autoReplyEnabled;
+  console.log(`🧠 [Sync] Restored State: Focus=${localFocus}, AutoReply=${autoReplyEnabled}`);
+});
 
 // -----------------------------------------------------------
 // 🔄 BACKEND FOCUS SYNC
@@ -142,7 +183,7 @@ async function syncFocusState() {
     if (res.ok) {
       const { focusMode } = await res.json();
       const stored = await chrome.storage.local.get("focusMode");
-      
+
       if (focusMode !== stored.focusMode) {
         console.log(`🔄 Syncing Focus Mode from Backend: ${focusMode ? "ON" : "OFF"}`);
         applyFocusState(focusMode);
@@ -150,22 +191,53 @@ async function syncFocusState() {
     }
     // 3. Sync Muted WhatsApp Chats
     try {
-        const muteRes = await fetch(`${BACKEND_URL}/whatsapp/muted`);
-        const mutedNames = await muteRes.json();
-        if (JSON.stringify(mutedNames) !== JSON.stringify(_mutedWhatsAppChats)) {
-            _mutedWhatsAppChats = mutedNames;
-            // Broadcast to all WhatsApp tabs
-            chrome.tabs.query({ url: "*://web.whatsapp.com/*" }, (tabs) => {
-                tabs.forEach(tab => {
-                    chrome.tabs.sendMessage(tab.id, { 
-                        type: "MUTE_LIST_UPDATE", 
-                        mutedNames: _mutedWhatsAppChats 
-                    });
-                });
+      const muteRes = await fetch(`${BACKEND_URL}/whatsapp/muted`);
+      const mutedNames = await muteRes.json();
+      if (JSON.stringify(mutedNames) !== JSON.stringify(_mutedWhatsAppChats)) {
+        _mutedWhatsAppChats = mutedNames;
+        // Broadcast to all WhatsApp tabs
+        chrome.tabs.query({ url: "*://web.whatsapp.com/*" }, (tabs) => {
+          tabs.forEach(tab => {
+            chrome.tabs.sendMessage(tab.id, {
+              type: "MUTE_LIST_UPDATE",
+              mutedNames: _mutedWhatsAppChats
+            }, () => {
+                const error = chrome.runtime.lastError;
+                if (error) {
+                    // console.warn(`Silent Sync: Tab ${tab.id} not ready yet.`);
+                }
             });
-        }
+          });
+        });
+      }
     } catch (e) {
-        console.error("Mute sync failed", e);
+      console.error("WA Mute sync failed", e);
+    }
+
+    // 4. Sync Muted Instagram Chats
+    try {
+      const igMuteRes = await fetch(`${BACKEND_URL}/instagram/muted`);
+      const igMutedNames = await igMuteRes.json();
+      if (JSON.stringify(igMutedNames) !== JSON.stringify(_mutedInstagramChats)) {
+        _mutedInstagramChats = igMutedNames;
+        // Broadcast to all Instagram tabs
+        chrome.tabs.query({ url: "*://www.instagram.com/*" }, (tabs) => {
+          tabs.forEach(tab => {
+            chrome.tabs.sendMessage(tab.id, {
+              type: "MUTE_LIST_UPDATE",
+              platform: "instagram",
+              mutedNames: _mutedInstagramChats
+            }, () => {
+                const error = chrome.runtime.lastError;
+                if (error) {
+                    // console.warn(`Silent Sync: Tab ${tab.id} not ready yet.`);
+                }
+            });
+          });
+        });
+      }
+    } catch (e) {
+      console.error("IG Mute sync failed", e);
     }
   } catch (e) {
     // console.warn("Focus sync failed");
@@ -182,7 +254,7 @@ async function checkScheduler() {
 
     const data = await res.json();
     const { activeMode, schedulerEnabled, manualOverride: backendOverride } = data;
-    
+
     // Use the backend's manual override state
     if (backendOverride) {
       console.log("⏸️ Scheduler paused due to Backend Manual Override");
@@ -207,6 +279,7 @@ async function checkScheduler() {
 
 // Helper to apply focus state to all browser components
 async function applyFocusState(newMode) {
+  localFocus = newMode; // Sync internal variable
   await chrome.storage.local.set({ focusMode: newMode });
 
   // 0. Fetch latest priority keywords to broadcast
@@ -215,43 +288,26 @@ async function applyFocusState(newMode) {
     const res = await fetch(`${BACKEND_URL}/keywords`);
     const data = await res.json();
     priorityKeywords = data.keywords || [];
-  } catch(e) {}
+  } catch (e) { }
 
   // 1. Manage Notifications (Native Level)
-  if (chrome.contentSettings && chrome.contentSettings.notifications) {
-    if (newMode) {
-      // 🎯 FORCE BLOCK distracting platforms at the browser level
-      // ... (custom sites fetch logic)
-      chrome.contentSettings.notifications.set({
-        primaryPattern: "<all_urls>",
-        setting: "block"
-      });
-      console.log("🔒 Site-specific native blocks applied for Focus Mode");
-    } else {
-      // Restore defaults — Tell Chrome to let the user decide again
-      chrome.contentSettings.notifications.set({
-        primaryPattern: "<all_urls>",
-        setting: "allow" 
-      });
-      // Also clear to ensure no cached extension-locks remain in the Chrome UI
-      chrome.contentSettings.notifications.clear({});
-      console.log("🔓 Focus Mode OFF: Native notification guard released.");
-    }
-  }
+  // [DISABLED NATIVE BLOCK TO ALLOW SMART JS BYPASS]
+  // We now rely entirely on page-script.js which understands 'Priority Personas'
+  console.log(`🧠 Smart Focus Switch: ${newMode ? "Activating Intelligence Guard" : "Releasing Shield"}`);
 
   // 2. Broadcast to all tabs & Mute/Unmute
   chrome.tabs.query({}, (tabs) => {
     tabs.forEach((tab) => {
       if (tab.id && !tab.url?.startsWith("chrome://")) {
         // Mute tab to block notification sounds (like Whatsapp ding)
-        chrome.tabs.update(tab.id, { muted: newMode }).catch(() => {});
-        
+        chrome.tabs.update(tab.id, { muted: newMode }).catch(() => { });
+
         // Notify content scripts to enable/update JS-level interception
         chrome.tabs.sendMessage(tab.id, {
           type: "EXTENSION_STATE_CHANGED",
           focusMode: newMode,
           priorityKeywords: priorityKeywords
-        }).catch(() => {});
+        }).catch(() => { });
       }
     });
   });
@@ -284,31 +340,34 @@ setInterval(async () => {
     const focusRes = await fetch(`${BACKEND_URL}/focus`);
     const siteRes = await fetch(`${BACKEND_URL}/custom-sites`);
     const kwRes = await fetch(`${BACKEND_URL}/keywords`);
-    
+
     if (focusRes.ok && siteRes.ok && kwRes.ok) {
       const { focusMode: backendFocusMode } = await focusRes.json();
       const { sites: backendSites = [] } = await siteRes.json();
       const { keywords: backendKeywords = [] } = await kwRes.json();
-      
-      const { 
-        focusMode: localFocusMode, 
-        siteCount = 0, 
-        kwCount = 0 
+
+      const {
+        focusMode: localFocusMode,
+        siteCount = 0,
+        kwCount = 0
       } = await chrome.storage.local.get(["focusMode", "siteCount", "kwCount"]);
-      
+
       // Re-apply if toggle changed OR if sites list changed OR if keywords list changed
       if (
-        localFocusMode !== backendFocusMode || 
-        siteCount !== backendSites.length || 
+        localFocusMode !== backendFocusMode ||
+        siteCount !== backendSites.length ||
         kwCount !== backendKeywords.length
       ) {
         console.log(`🔄 Sync Triggered (Total Change Detection)`);
-        await chrome.storage.local.set({ 
+        await chrome.storage.local.set({
           siteCount: backendSites.length,
-          kwCount: backendKeywords.length 
+          kwCount: backendKeywords.length
         });
         await applyFocusState(backendFocusMode);
       }
+      
+      // 🎯 High-Precision Scheduler Sync (Instant Activation)
+      checkScheduler(); 
     }
   } catch (e) {
     // Backend offline
@@ -356,10 +415,12 @@ async function handleTabChange(tabId, url) {
   // 1. Fetch custom sites and priority keywords from our persistent backend store
   let customSites = [];
   let priorityKeywords = [];
+  let activeMode = "";
   try {
-    const [sitesRes, kwRes] = await Promise.all([
+    const [sitesRes, kwRes, statusRes] = await Promise.all([
       fetch(`${BACKEND_URL}/custom-sites`),
-      fetch(`${BACKEND_URL}/keywords`)
+      fetch(`${BACKEND_URL}/keywords`),
+      fetch(`${BACKEND_URL}/schedule/status`)
     ]);
     if (sitesRes.ok) {
       const data = await sitesRes.json();
@@ -369,6 +430,10 @@ async function handleTabChange(tabId, url) {
       const data = await kwRes.json();
       priorityKeywords = data.keywords || [];
     }
+    if (statusRes.ok) {
+      const data = await statusRes.json();
+      activeMode = data.activeMode || "Normal Mode";
+    }
   } catch (e) {
     // Backend offline, fallback gracefully
   }
@@ -377,7 +442,7 @@ async function handleTabChange(tabId, url) {
   let type = classifySite(url);
   try {
     const hostname = new URL(url).hostname.replace(/^www\./, "");
-    
+
     // Normalize user-entered sites to strip protocol and www
     const isCustomBlocked = customSites.some(rawSite => {
       let cleanSite = rawSite.trim().toLowerCase();
@@ -396,7 +461,7 @@ async function handleTabChange(tabId, url) {
     } else if (isCustomBlocked) {
       type = "distraction";
     }
-  } catch (e) {}
+  } catch (e) { }
 
   // 3. Check focus mode status
   const { focusMode = false } = await chrome.storage.local.get("focusMode");
@@ -407,8 +472,8 @@ async function handleTabChange(tabId, url) {
   else sessionStats.neutral++;
 
   // 4. Decision: should we block?
-  // [SITE BLOCKING RESTORED & ENHANCED WITH PRIORITY BYPASS]
-  if (shouldBlock(type, focusMode)) {
+  // [SITE BLOCKING RESTORED & ENHANCED WITH MODE & PRIORITY BYPASS]
+  if (shouldBlock(type, focusMode, activeMode)) {
     // Block by redirecting to blocked page
     const blockedPageUrl =
       chrome.runtime.getURL("blocked.html") +
@@ -466,12 +531,21 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // Listen for messages from popup & content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "GET_SYNC_DATA") {
-    sendResponse({ 
-      focusMode: _focusState, 
-      blockedSites: _blockedSites,
-      mutedWhatsAppChats: _mutedWhatsAppChats
+    chrome.storage.local.get(["focusMode", "customBlockedSites"], (data) => {
+      sendResponse({
+        focusMode: data.focusMode || false,
+        blockedSites: data.customBlockedSites || [],
+        mutedWhatsAppChats: _mutedWhatsAppChats
+      });
     });
-    return true;
+    return true; // Keep message channel open for async response
+  }
+
+  // FORCE_SCHEDULER_CHECK: Immediate polling (Bypass 1-min alarm)
+  if (message.type === "FORCE_SCHEDULER_CHECK") {
+    console.log("⚡ FORCE_SYNC: Manually triggering scheduler check...");
+    checkScheduler();
+    return false;
   }
 
   // Extension state (focus + keywords)
@@ -494,20 +568,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.local.get("focusMode", (data) => {
       sendResponse({ focusMode: data.focusMode || false });
     });
-    return true; 
+    return true;
   }
 
   // Focus mode toggle
   if (message.type === "TOGGLE_FOCUS_MODE") {
     chrome.storage.local.get("focusMode", (data) => {
       const newMode = !data.focusMode;
-      
+
       // Update store and backend
       fetch(`${BACKEND_URL}/focus`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ focusMode: newMode }),
-      }).catch(() => {});
+      }).catch(() => { });
 
       // Apply changes locally (mute, block, notify)
       // Removed native OS block to allow our interception scripts to track for the dashboard
@@ -520,36 +594,84 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // Handle blocked notifications reported by the content script
-  if (message.type === "NOTIFICATION_BLOCKED") {
-    console.log("🔕 Notification blocked from:", message.data?.hostname);
+  // Handle both blocked and allowed notifications reported by the content script (Unified Audit)
+  if (message.type === "NOTIFICATION_EVENT") {
+    const isBlocked = message.data?.status === "blocked";
     
-    // Update local counter
-    sessionStats.blocked++;
-    
-    // Send to backend so it counts towards 'Blocked Today' logs table
+    if (isBlocked) {
+      console.log("🔕 Notification blocked from:", message.data?.title);
+      sessionStats.blocked++;
+    } else {
+      console.log("💎 Priority notification allowed:", message.data?.title);
+    }
+
+    // Send to Activity Log so it shows in the table
+    const sourceUrl = message.data?.url || "Web Platform";
+    const sender = message.data?.title || "Unknown";
+    const reason = message.data?.source || "distraction"; // 'urgent', 'priority', 'focus_mode', etc.
+
+    // 📊 UPDATE SESSION STATS (Production Spec Step 11)
+    sessionStats.total++;
+    if (isBlocked) {
+      sessionStats.blocked++;
+    } else {
+      sessionStats.allowed++;
+      if (reason === "urgent" || reason === "dom_observer") sessionStats.urgent++;
+    }
+
     sendLog({
-      url: message.data?.url || "",
-      hostname: message.data?.hostname || "unknown",
-      type: "distraction", // Notifications are treated as distractions when blocked
-      action: "blocked",
+      url: sourceUrl,
+      hostname: isBlocked ? `🔕 Silenced: ${sender}` : `✅ Allowed: ${sender}`,
+      type: isBlocked ? "distraction" : "productive", 
+      action: isBlocked ? "blocked" : "allowed",
       timestamp: message.data?.timestamp || new Date().toISOString(),
       metadata: {
-        source: message.data?.source,
-        title: message.data?.title
+        source: reason,
+        title: sender,
+        body: message.data?.body,
+        isUrgent: reason === "urgent" || reason === "dom_observer"
       }
     });
 
-    // Also heavily forward this to the new Unified Action Center AI Router!
+    // Also forward to the AI Decision Engine for final routing record
     fetch(`${BACKEND_URL}/notifications/route`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         platform: message.data?.hostname || "Web Platform",
-        sender: "Background Alert",
-        content: message.data?.title || "Silently intercepted browser notification",
-        metadata: { source: "Focus Mode Observer" }
+        sender: message.data?.title || "Focus Mode Observer",
+        content: message.data?.body || message.data?.title || "Notification event intercepted",
+        metadata: { source: "Focus Mode Observer", status: message.data?.status }
       })
-    }).catch(() => {});
+    }).catch(() => { });
+
+    // 🤖 TRIGGER SMART AUTO-REPLY (Production Spec Step 13)
+    if (isBlocked && autoReplyEnabled && localFocus) {
+        const lastTime = autoReplyCooldowns[sender] || 0;
+        if (Date.now() - lastTime > COOLDOWN_MS) {
+            console.log(`🤖 [Auto-Reply] Triggering for: ${sender}`);
+            autoReplyCooldowns[sender] = Date.now();
+            sessionStats.autoReplies++;
+
+            // Send trigger to content script if possible (platform specific)
+            if (sourceUrl.includes("whatsapp.com")) {
+              chrome.tabs.query({ url: "*://web.whatsapp.com/*" }, (tabs) => {
+                tabs.forEach(tab => {
+                   chrome.tabs.sendMessage(tab.id, {
+                     type: "TRIGGER_AUTO_REPLY",
+                     sender: sender,
+                     reply: "I'm currently in focus mode. Will get back to you soon."
+                   }, () => {
+                     if (chrome.runtime.lastError) {
+                       // Silently ignore: happens when content script isn't loaded
+                       console.warn(`🤖 [Auto-Reply] Tab ${tab.id} not ready.`);
+                     }
+                   });
+                });
+              });
+            }
+        }
+    }
     
     return false;
   }
@@ -576,7 +698,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chats: message.chats }),
-    }).catch(() => {});
+    }).catch(() => { });
     return false;
   }
 
@@ -585,19 +707,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ emails: message.emails }),
-    }).catch(() => {});
+    }).catch(() => { });
+    return false;
+  }
+
+  if (message.type === "UPDATE_INSTAGRAM_CHATS") {
+    fetch(`${BACKEND_URL}/instagram/chats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chats: message.chats }),
+    }).catch(() => { });
     return false;
   }
 
   // Remote Automation: Trigger mute sequence in the WhatsApp tab
   if (message.type === "AUTOMATE_WA_MUTE") {
     chrome.tabs.query({ url: "*://web.whatsapp.com/*" }, (tabs) => {
-        tabs.forEach(tab => {
-            chrome.tabs.sendMessage(tab.id, { 
-                type: "TRIGGER_WA_MUTE_DOM", 
-                name: message.name 
-            });
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, {
+          type: "TRIGGER_WA_MUTE_DOM",
+          name: message.name
+        }, () => {
+          const error = chrome.runtime.lastError;
+          if (error) {
+             // console.warn(`🤖 [Automation] Tab ${tab.id} not ready yet.`);
+          }
         });
+      });
+    });
+    sendResponse({ status: "forwarded" });
+    return true;
+  }
+
+  // Remote Automation: Trigger mute sequence in the Instagram tab
+  if (message.type === "AUTOMATE_IG_MUTE") {
+    chrome.tabs.query({ url: "*://www.instagram.com/*" }, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, {
+          type: "TRIGGER_IG_MUTE_DOM",
+          name: message.name
+        }, () => {
+          const error = chrome.runtime.lastError;
+          if (error) {
+             // console.warn(`🤖 [Automation] Tab ${tab.id} not ready yet.`);
+          }
+        });
+      });
     });
     sendResponse({ status: "forwarded" });
     return true;
@@ -607,18 +762,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "SCAN_CONTENT_MATCH") {
     chrome.storage.local.get("focusMode", (data) => {
       if (!data.focusMode) return;
-      
+
       // Perform a silent fetch of keywords to check match
       fetch(`${BACKEND_URL}/keywords`)
         .then(res => res.json())
         .then(kwData => {
           const keywords = kwData.keywords || [];
           const found = keywords.some(kw => message.text.toLowerCase().includes(kw.toLowerCase()));
-          
-           if (found) {
-             console.log("💎 Priority keyword detected in page content! Ensuring unblocked state...");
-           }
-        }).catch(() => {});
+
+          if (found) {
+            console.log("💎 Priority keyword detected in page content! Ensuring unblocked state...");
+          }
+        }).catch(() => { });
     });
     return false;
   }
@@ -641,5 +796,13 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "checkScheduler") {
     checkScheduler();
+    syncFocusState(); // Ensure focus mode + whatsapp mutes are in sync with backend logic
   }
 });
+
+// INITIAL CALLS FOR STARTUP SYNC
+checkScheduler();
+syncFocusState();
+
+// ALSO POLLING FOR FASTER UPDATE (every 20 seconds for mutes)
+setInterval(syncFocusState, 20000);

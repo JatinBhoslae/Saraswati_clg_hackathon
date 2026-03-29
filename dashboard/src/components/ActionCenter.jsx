@@ -16,7 +16,9 @@ export default function ActionCenter() {
     try {
       const res = await fetch("http://localhost:5001/api/notifications");
       const data = await res.json();
-      setNotifications(data.notifications || []);
+      // MongoDB uses _id, map it to id for the frontend
+      const mapped = (data.notifications || []).map(n => ({ ...n, id: n._id }));
+      setNotifications(mapped);
     } catch (err) {
       console.error("Failed to fetch notifications:", err);
     } finally {

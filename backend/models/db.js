@@ -79,6 +79,7 @@ const scheduleSchema = new mongoose.Schema({
   type: { type: String, enum: ["daily", "weekly", "custom", "once"], default: "weekly" },
   isActive: { type: Boolean, default: true },
   label: String,
+  priorityKeywords: [String], // Names or words that bypass blocking during this schedule
   lunchStartTime: String,
   lunchEndTime: String,
 });
@@ -92,7 +93,15 @@ const googleAuthSchema = new mongoose.Schema({
   email: String,
 });
 
+const GmailAuthSchema = new mongoose.Schema({
+  accessToken: String,
+  refreshToken: String,
+  expiryDate: Number,
+  email: String,
+});
+
 const GoogleAuth = mongoose.model("GoogleAuth", googleAuthSchema);
+const GmailAuth = mongoose.model("GmailAuth", GmailAuthSchema);
 
 const WhatsAppChatSchema = new mongoose.Schema({
   name: { type: String, unique: true },
@@ -101,6 +110,11 @@ const WhatsAppChatSchema = new mongoose.Schema({
   unreadCount: Number,
   avatar: String,
   isMuted: { type: Boolean, default: false },
+  // 🕒 NEW: Granular Muting Schedule
+  muteStartTime: String, // "09:00"
+  muteEndTime: String,   // "18:00"
+  muteDays: [String],    // ["Mon", "Tue"]
+  muteType: { type: String, enum: ["daily", "weekly", "once"], default: "daily" },
   lastSynced: { type: Date, default: Date.now }
 });
 
@@ -117,6 +131,22 @@ const GmailEmailSchema = new mongoose.Schema({
 const WhatsAppChat = mongoose.model("WhatsAppChat", WhatsAppChatSchema);
 const GmailEmail = mongoose.model("GmailEmail", GmailEmailSchema);
 
+const InstagramChatSchema = new mongoose.Schema({
+  name: { type: String, unique: true },
+  displayName: String,
+  lastAction: String,
+  unreadCount: { type: Number, default: 0 },
+  avatar: String,
+  isMuted: { type: Boolean, default: false },
+  // 🕒 NEW: Granular Muting Schedule
+  muteStartTime: String, // "09:00"
+  muteEndTime: String,   // "18:00"
+  muteDays: [String],    // ["Mon", "Tue"]
+  muteType: { type: String, enum: ["daily", "weekly", "once"], default: "daily" },
+  lastSynced: { type: Date, default: Date.now }
+});
+const InstagramChat = mongoose.model("InstagramChat", InstagramChatSchema);
+
 module.exports = {
   ActivityLog,
   CustomSite,
@@ -126,6 +156,8 @@ module.exports = {
   NotificationRecord,
   Schedule,
   GoogleAuth,
+  GmailAuth,
   WhatsAppChat,
-  GmailEmail
+  GmailEmail,
+  InstagramChat
 };

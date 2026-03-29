@@ -15,7 +15,8 @@ const {
   Schedule,
   GoogleAuth,
   WhatsAppChat,
-  GmailEmail
+  GmailEmail,
+  InstagramChat
 } = require("./db");
 
 const MAX_LOGS = 1000; // Prevent memory overflow
@@ -43,10 +44,17 @@ let customBlockedSites = [];
 let priorityKeywords = [];
 
 // 📅 Scheduler & Calendar State
-let schedules = [];
 let schedulerEnabled = true;
+let whatsappChats = [];
+let mutedWhatsAppChatNames = [];
+let instagramChats = [];
+let mutedInstagramChatNames = [];
+let gmailEmails = [];
+// 🤖 Smart Auto-Reply State (Production Spec Step 13)
+let autoReplyEnabled = true;
 let todayCalendarEvents = [];
 let calendarLastUpdated = null;
+let lastSessionDigest = null; // 🛡️ NEW: Storage for the Post-Focus Recovery Vault
 
 // Initialization - Load from DB
 async function initStore() {
@@ -95,6 +103,9 @@ async function initStore() {
     }));
 
     console.log("✅ Store synced successfully with MongoDB (WA/GM persistent)");
+    
+    // 📅 Start Background Calendar Polling (to catch phone events)
+    store.startAutonomousCalendarSync();
   } catch (err) {
     console.error("🔴 Failed to sync store from MongoDB", err);
   }
@@ -104,11 +115,8 @@ async function initStore() {
 initStore();
 
 // -----------------------------------------------------------
-// 💬 Platform Specific Data
+// 💬 Platform Specific Data (Initialized above)
 // -----------------------------------------------------------
-let whatsappChats = [];
-let mutedWhatsAppChatNames = []; // Global list of chat names muted from dashboard
-let gmailEmails = [];
 
 
 // -----------------------------------------------------------
@@ -264,15 +272,64 @@ const store = {
     return whatsappChats;
   },
   getMutedWhatsAppChats() {
-    return mutedWhatsAppChatNames;
+    const now = new Date();
+    const currentMins = now.getHours() * 60 + now.getMinutes();
+    const dayName = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][now.getDay()];
+
+    // Merge explicitly muted names with those currently in a Mute Schedule
+    const scheduledMutes = whatsappChats.filter(chat => {
+      if (!chat.isMuted) return false;
+      
+      // Check Schedule Range (if set)
+      if (chat.muteStartTime && chat.muteEndTime) {
+          const startMins = timeToMinutes(chat.muteStartTime);
+          const endMins = timeToMinutes(chat.muteEndTime);
+          const isTimeMatch = currentMins >= startMins && currentMins <= endMins;
+          const isDayMatch = !chat.muteDays || chat.muteDays.length === 0 || chat.muteDays.includes(dayName);
+          
+          return isTimeMatch && isDayMatch;
+      }
+      
+      // If no start/end time specified but isMuted is true, it's a permanent mute
+      return true;
+    }).map(c => c.name);
+
+    return [...new Set([...mutedWhatsAppChatNames, ...scheduledMutes])];
   },
-  muteWhatsAppChat(name) {
-    if (!mutedWhatsAppChatNames.includes(name)) {
-      mutedWhatsAppChatNames.push(name);
+  muteWhatsAppChat(name, schedule = {}) {
+    // 🔥 FIX: If it's a schedule (has start/end), REMOVE from permanent global list
+    // This allows the temporal logic in getMutedWhatsAppChats() to be the sole decision maker.
+    const isPermanent = !schedule.muteStartTime || !schedule.muteEndTime;
+    
+    if (isPermanent) {
+      if (!mutedWhatsAppChatNames.includes(name)) {
+        mutedWhatsAppChatNames.push(name);
+      }
+    } else {
+      // It's a schedule! Remove from global permanent list so it can auto-unmute
+      mutedWhatsAppChatNames = mutedWhatsAppChatNames.filter(n => n !== name);
     }
+    
+    // Update individual chat object state (this will be used by the temporal filter)
+    whatsappChats = whatsappChats.map(c => {
+      if (c.name === name) {
+        const updated = { ...c, isMuted: true, ...schedule };
+        WhatsAppChat.findOneAndUpdate({ name }, updated, { upsert: true }).catch(() => {});
+        return updated;
+      }
+      return c;
+    });
   },
   unmuteWhatsAppChat(name) {
     mutedWhatsAppChatNames = mutedWhatsAppChatNames.filter(n => n !== name);
+    whatsappChats = whatsappChats.map(c => {
+      if (c.name === name) {
+        const updated = { ...c, isMuted: false };
+        WhatsAppChat.findOneAndUpdate({ name }, updated, { upsert: true }).catch(() => {});
+        return updated;
+      }
+      return c;
+    });
   },
 
   setGmailEmails(emails) {
@@ -291,6 +348,81 @@ const store = {
   getGmailEmails() {
     return gmailEmails;
   },
+
+  // === INSTAGRAM OPERATIONS ===
+  setInstagramChats(chats) {
+    instagramChats = chats;
+    // Persist to DB
+    chats.forEach(chat => {
+      InstagramChat.findOneAndUpdate(
+        { name: chat.name },
+        { ...chat, lastSynced: new Date() },
+        { upsert: true, new: true }
+      ).catch(e => console.error("IG Persist failed", e));
+    });
+  },
+  getInstagramChats() {
+    return instagramChats;
+  },
+  getMutedInstagramChats() {
+    const now = new Date();
+    const currentMins = now.getHours() * 60 + now.getMinutes();
+    const dayName = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][now.getDay()];
+
+    // Merge explicitly muted names with those currently in a Mute Schedule
+    const scheduledMutes = instagramChats.filter(chat => {
+      if (!chat.isMuted) return false;
+      
+      // Check Schedule Range (if set)
+      if (chat.muteStartTime && chat.muteEndTime) {
+          const startMins = timeToMinutes(chat.muteStartTime);
+          const endMins = timeToMinutes(chat.muteEndTime);
+          const isTimeMatch = currentMins >= startMins && currentMins <= endMins;
+          const isDayMatch = !chat.muteDays || chat.muteDays.length === 0 || chat.muteDays.includes(dayName);
+          
+          return isTimeMatch && isDayMatch;
+      }
+      
+      // If no start/end time specified but isMuted is true, it's a permanent mute
+      return true;
+    }).map(c => c.name);
+
+    return [...new Set([...mutedInstagramChatNames, ...scheduledMutes])];
+  },
+  muteInstagramChat(name, schedule = {}) {
+    // 🔥 FIX: If it's a schedule (has start/end), REMOVE from permanent global list
+    const isPermanent = !schedule.muteStartTime || !schedule.muteEndTime;
+    
+    if (isPermanent) {
+      if (!mutedInstagramChatNames.includes(name)) {
+        mutedInstagramChatNames.push(name);
+      }
+    } else {
+      mutedInstagramChatNames = mutedInstagramChatNames.filter(n => n !== name);
+    }
+    
+    // Update individual chat object state
+    instagramChats = instagramChats.map(c => {
+      if (c.name === name) {
+        const updated = { ...c, isMuted: true, ...schedule };
+        InstagramChat.findOneAndUpdate({ name }, updated, { upsert: true }).catch(() => {});
+        return updated;
+      }
+      return c;
+    });
+  },
+  unmuteInstagramChat(name) {
+    mutedInstagramChatNames = mutedInstagramChatNames.filter(n => n !== name);
+    instagramChats = instagramChats.map(c => {
+      if (c.name === name) {
+        const updated = { ...c, isMuted: false };
+        InstagramChat.findOneAndUpdate({ name }, updated, { upsert: true }).catch(() => {});
+        return updated;
+      }
+      return c;
+    });
+  },
+
   setGmailTokens(tokens) {
     gmailTokens = tokens;
   },
@@ -301,15 +433,39 @@ const store = {
   // === FOCUS MODE OPERATIONS ===
 
   /** Set focus mode on/off and track time */
-  setFocusMode(newMode) {
+  async setFocusMode(newMode) {
     if (newMode && !focusMode) {
       focusModeStartTime = Date.now();
+      lastSessionDigest = null; // Clear previous digest when starting new session
       this.addXP(5); // Reward for starting focus
     } else if (!newMode && focusMode && focusModeStartTime) {
-      // Ending focus mode — accumulate time
+      // Ending focus mode — build the recovery digest
       const sessionMs = Date.now() - focusModeStartTime;
       totalFocusTimeMs += sessionMs;
       
+      // 🛡️ RECOVERY VAULT LOGIC: Collect missed urgent stuff
+      try {
+          const missedNotifications = await NotificationRecord.find({
+              timestamp: { $gte: new Date(focusModeStartTime) },
+              status: "blocked"
+          }).lean();
+
+          lastSessionDigest = {
+              durationMs: sessionMs,
+              endTime: new Date(),
+              totalBlocked: missedNotifications.length,
+              urgentBlocked: missedNotifications.filter(n => 
+                  n.sender?.toLowerCase().includes("boss") || 
+                  n.content?.toLowerCase().includes("urgent") ||
+                  n.content?.toLowerCase().includes("asap")
+              ),
+              summary: missedNotifications.slice(0, 5) // Last 5 items for the summary view
+          };
+          console.log("🛡️ [Recovery] Session Digest generated with", lastSessionDigest.totalBlocked, "blocked items.");
+      } catch (e) {
+          console.error("Failed to generate session digest", e);
+      }
+
       // Reward deep work time (1 XP per minute)
       this.addXP(Math.floor(sessionMs / 60000));
       focusModeStartTime = null;
@@ -327,6 +483,7 @@ const store = {
       focusMode,
       startTime: focusModeStartTime,
       totalTimeMs: totalFocusTimeMs,
+      lastDigest: lastSessionDigest
     };
   },
 
@@ -370,7 +527,15 @@ const store = {
 
   // === KEYWORD OPERATIONS (Context-Aware Engine) ===
   getPriorityKeywords() {
-    return priorityKeywords;
+    // 1. If in Manual Focus Mode -> Returns ONLY Global Keywords from Settings
+    if (manualOverride && focusMode) {
+      return [...new Set(priorityKeywords)];
+    }
+
+    // 2. If in Automation (Schedule) -> Returns Global + Schedule-Specific Keywords
+    const activeSch = this.getActiveSchedule();
+    const scheduleKws = activeSch ? (activeSch.priorityKeywords || []) : [];
+    return [...new Set([...priorityKeywords, ...scheduleKws])];
   },
 
   addPriorityKeyword(keyword) {
@@ -411,6 +576,14 @@ const store = {
   // === SCHEDULER OPERATIONS ===
   getSchedules() { return schedules; },
   async addSchedule(sch) {
+    // 🧠 AUTO PRIORITY INJECTION (Production Spec):
+    const bossKws = ["boss", "manager", "team lead"];
+    bossKws.forEach(kw => {
+      if (!priorityKeywords.includes(kw)) {
+        this.addPriorityKeyword(kw);
+      }
+    });
+
     const s = await Schedule.create(sch);
     schedules.push(s);
     return s;
@@ -440,11 +613,26 @@ const store = {
     calendarLastUpdated = new Date();
   },
   getCalendarEvents() { return todayCalendarEvents; },
+  
+  getActiveSchedule() {
+    const now = new Date();
+    const currentMins = now.getHours() * 60 + now.getMinutes();
+    const dayOrder = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayName = dayOrder[now.getDay()];
+    
+    return schedules.find(s => {
+      if (!s.isActive) return false;
+      if (!s.days.includes(dayName)) return false;
+      const start = timeToMinutes(s.startTime);
+      const end = timeToMinutes(s.endTime);
+      return currentMins >= start && currentMins <= end;
+    });
+  },
 
   /** Final Decision Logic for Mode Switching */
   getCurrentMode() {
-    // 1. Manual Override Check (Rule 1: Highest Priority)
-    if (manualOverride) return focusMode ? "Office Mode (Manual)" : "Normal (Manual Override)";
+    // 1. Manual Override Check (Only if specifically toggled ON)
+    if (manualOverride && focusMode) return "Focus Mode (Manual)";
 
     // 2. Holiday / Lunch Check (Calendar Events with Time-awareness)
     const now = new Date();
@@ -477,14 +665,32 @@ const store = {
     // 3. Fallback to Scheduler Check
     if (!schedulerEnabled) return "Normal (Disabled)";
 
-    for (const s of schedules) {
-        if (!s.isActive) continue;
-        if (isValidDay(s.days) && isWithinTimeRange(s.startTime, s.endTime)) {
-            return "Office Mode (Auto)";
-        }
+    const activeSchedule = this.getActiveSchedule();
+    if (activeSchedule) {
+      return `Office Mode (Schedule: ${activeSchedule.label || "Auto"})`;
     }
 
     return "Normal Mode";
+  },
+
+  /** Start 5-min polling for Google Calendar events */
+  startAutonomousCalendarSync() {
+    const FIVE_MINS = 5 * 60 * 1000;
+    // Delayed require to avoid circular dependency issues at boot
+    const { syncCalendarToStore } = require("../routes/calendarRoutes");
+
+    console.log("🕒 Autonomous Calendar Poller: Initializing...");
+    
+    const poll = async () => {
+      console.log("📅 Autonomous Poller: Syncing Google Calendar...");
+      const result = await syncCalendarToStore(this);
+      if (result.success) console.log(`✅ Autonomous Poller: Synced ${result.count} events`);
+    };
+
+    // Run once on boot
+    poll();
+    // Then every 5 mins
+    setInterval(poll, FIVE_MINS);
   }
 };
 

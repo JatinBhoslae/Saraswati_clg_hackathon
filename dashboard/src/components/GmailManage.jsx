@@ -3,7 +3,7 @@ import axios from "axios";
 
 const GMAIL_API_BASE = "http://localhost:5001/api/gmail";
 
-const GmailManage = () => {
+const GmailManage = ({ gmailInfo: globalGmailInfo }) => {
     const [emails, setEmails] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -30,6 +30,16 @@ const GmailManage = () => {
             setLoading(false);
         }
     };
+
+    // Global Prop Sync (Overwrites local state for multi-tab parity)
+    useEffect(() => {
+        if (globalGmailInfo) {
+            setIsAuthenticated(globalGmailInfo.linked);
+            if (globalGmailInfo.linked && emails.length === 0) {
+                fetchEmails();
+            }
+        }
+    }, [globalGmailInfo]);
 
     const fetchEmails = async () => {
         try {

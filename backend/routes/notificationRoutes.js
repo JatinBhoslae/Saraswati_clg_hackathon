@@ -13,69 +13,92 @@ module.exports = (store) => {
   router.post('/route', async (req, res) => {
     try {
       const { platform, sender, content, metadata } = req.body;
-      let decision;
-      // Fallback/Hard-Heuristic Match (Seniors Spec Step 4)
-      const priorityList = store.getPriorityKeywords() || [];
-      const userContext = store.getFocusState();
+      const cleanContent = (content || "").toLowerCase().trim();
+      const cleanSender = (sender || "").toLowerCase().trim();
+
+      const priorityKeywords = store.getPriorityKeywords() || [];
+      const bossKeywords = ["boss", "manager", "team lead", "urgent", "meeting", "call"];
       
-      const isUrgent = priorityList.some(kw => 
-        (content || "").toLowerCase().includes(kw.toLowerCase()) || 
-        (sender || "").toLowerCase().includes(kw.toLowerCase())
-      ) || ["mom", "dad", "urgent", "call", "asap", "meeting", "interview"].some(u => 
-        (content || "").toLowerCase().includes(u) || (sender || "").toLowerCase().includes(u)
-      );
-
       const activeMode = store.getCurrentMode();
+      const automationActive = activeMode.includes("Office Mode");
+      const focusActive = activeMode.includes("Focus Mode");
+      
+      let decision = { decision: "deliver", reason: "normal", status: "allowed", mode: "normal", priority: 5 };
 
-      if (isUrgent) {
-        decision = { decision: "deliver", reason: "Family priority or urgent keyword detected by engine", priority: 10 };
-      } else {
-        const prompt = `
-          You are an intelligent notification router. I am currently in ${activeMode}.
-          Identify if this notification is from a priority contact or vital for work.
-          
-          CRITICAL RULES:
-          1. If the content contains "reel", "post", or an instagram/tiktok link -> delay
-          2. If it's a "Promotion", "Newsletter", or "Junk" email -> suppress (delay)
-          3. If it's from Google Meet, Teams, Slack, or an 'Office' group -> deliver
-          4. If it's lunch break (${activeMode.includes('Lunch')}), deliver more casual content but still delay reels.
-          
-          Return JSON: { "decision": "deliver" | "delay" | "suppress", "reason": "reason", "priority": 1-10 }
-          
-          NOTIFICATION:
-          From: ${sender}
-          Platform: ${platform}
-          Content: ${content}
-        `;
+      // 🆘 STAGE 0: URGENCY DETECTION (Message-Level Override)
+      const detectUrgency = (text) => {
+        if (!text) return false;
+        // Normalize: lowercase + remove punctuation
+        const normalized = text.toLowerCase().replace(/[^\w\s]/g, "");
+        const urgentKws = ["urgent", "emergency", "asap", "immediately", "right now", "call me", "important", "fast", "as soon as possible", "plz call now", "call now", "urgent!!"];
+        return urgentKws.some(kw => normalized.includes(kw.replace(/[^\w\s]/g, "")));
+      };
+
+      const isUrgentMsg = detectUrgency(content);
+      const isPriority = priorityKeywords.some(kw => cleanContent.includes(kw.toLowerCase()) || cleanSender.includes(kw.toLowerCase()));
+      // Boss keys only pierce the shield during an active scheduler block (Office Mode)
+      const isBoss = automationActive && bossKeywords.some(kw => cleanContent.includes(kw) || cleanSender.includes(kw));
+
+      if (isUrgentMsg || isPriority || isBoss) {
+        decision = { 
+          decision: "deliver", 
+          reason: isUrgentMsg ? "urgent" : (isBoss ? "boss" : "priority"), 
+          status: "allowed", 
+          mode: automationActive ? "automation" : focusActive ? "focus" : "normal",
+          priority: isUrgentMsg ? 10 : 8
+        };
+      } 
+      // 🛑 STAGE 2: RESTRICTIVE MODE ENFORCEMENT
+      else if (automationActive || focusActive) {
+        decision = { 
+          decision: "delay", 
+          reason: "distraction", 
+          status: "blocked", 
+          mode: automationActive ? "automation" : "focus",
+          priority: 3
+        };
+      } 
+      // 🎭 STAGE 3: INTELLIGENT ROUTING (Normal Mode)
+      else {
         try {
+          const prompt = `
+            You are an intelligent notification router. My current state is: ${activeMode}.
+            Return JSON: { "decision": "deliver" | "delay" | "suppress", "reason": "reason", "priority": 1-10 }
+            
+            NOTIFICATION: From: ${sender}, Platform: ${platform}, Content: ${content}
+          `;
           const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
           const result = await model.generateContent(prompt);
-          const text = result.response.text();
-          decision = JSON.parse(text);
+          const aiResponse = JSON.parse(result.response.text());
+          
+          decision = {
+            decision: aiResponse.decision || "deliver",
+            reason: aiResponse.reason || "normal",
+            status: aiResponse.decision === "deliver" ? "allowed" : "blocked",
+            mode: "normal",
+            priority: aiResponse.priority || 5
+          };
         } catch (aiError) {
-          console.error("⚠️ AI Router Fallback Triggered (Gemini Error):", aiError.message);
-          decision = { decision: "deliver", reason: "Fallback logic due to AI service unavailability", priority: 5 };
+          console.error("⚠️ AI Fallback:", aiError.message);
+          decision = { decision: "deliver", reason: "fallback", status: "allowed", mode: "normal", priority: 5 };
         }
       }
 
-      console.log(`🧠 AI Notification Decision for [${platform} from ${sender}]: ${decision.decision}`);
-      
+      console.log(`🧠 Router [${activeMode}]: ${decision.status.toUpperCase()} (${decision.reason}) from ${sender}`);
+
       const notification = await NotificationRecord.create({
         platform,
         sender,
         content,
-        metadata: metadata || {},
-        decision: decision.decision || "deliver",
+        metadata: { ...metadata, mode: decision.mode, status: decision.status, reason: decision.reason },
+        decision: decision.decision,
         reason: decision.reason,
         priority: decision.priority || 5,
         timestamp: new Date(),
         read: false
       });
       
-      res.json({
-        success: true,
-        notification
-      });
+      res.json({ success: true, notification });
       
     } catch (error) {
       console.error("AI Notification Router error:", error);

@@ -97,13 +97,14 @@
   // When the injected script blocks a notification, it fires
   // a CustomEvent. We catch it here and forward to background.
   // -----------------------------------------------------------
-  window.addEventListener("__pa_notif_blocked__", function (e) {
+  window.addEventListener("__pa_notif_event__", function (e) {
     if (!contextAlive || !isContextValid()) return;
 
     const detail = e.detail || {};
     safeSendMessage({
-      type: "NOTIFICATION_BLOCKED",
+      type: "NOTIFICATION_EVENT",
       data: {
+        status: detail.status || "blocked", 
         url: window.location.href,
         hostname: window.location.hostname,
         title: detail.title || "Unknown",
@@ -117,11 +118,19 @@
   // 🔔 NEW: Listen for automation requests from Dashboard UI
   window.addEventListener("__pa_automate_mute__", function(e) {
     if (!contextAlive || !isContextValid()) return;
-    const { name } = e.detail || {};
+    const { name, platform } = e.detail || {};
     if (name) {
-        console.log(`🤖 Extension received automation request from Dashboard for: ${name}`);
-        safeSendMessage({ type: "AUTOMATE_WA_MUTE", name });
+        console.log(`🤖 Extension received automation request from Dashboard for: ${name} [${platform || 'whatsapp'}]`);
+        const type = platform === "instagram" ? "AUTOMATE_IG_MUTE" : "AUTOMATE_WA_MUTE";
+        safeSendMessage({ type, name });
     }
+  });
+
+  // ⚡ Force instant scheduler re-check (Bypass 1-min delay)
+  window.addEventListener("__pa_force_sync__", function() {
+    if (!contextAlive || !isContextValid()) return;
+    console.log("⚡ Dashboard triggered instant mode switch check...");
+    safeSendMessage({ type: "FORCE_SCHEDULER_CHECK" });
   });
 
   // -----------------------------------------------------------
@@ -191,20 +200,130 @@
           if (message.priorityKeywords) {
             broadcastKeywords(message.priorityKeywords);
           }
-        } else if (message.type === "MUTE_LIST_UPDATE") {
-          mutedWhatsAppChats = message.mutedNames;
-          broadcastUpdates(focusModeActive, [], mutedWhatsAppChats);
-          applyMuteVisuals();
+        } else if (message.type === "TRIGGER_AUTO_REPLY") {
+          processAutoReply(message.sender, message.reply);
         } else if (message.type === "TRIGGER_WA_MUTE_DOM") {
-          console.log(`🎯 [ContentScript] Triggering DOM automation for: ${message.name}`);
           automateWhatsAppMute(message.name);
+        } else if (message.type === "TRIGGER_IG_MUTE_DOM") {
+          automateInstagramMute(message.name);
         }
-
-
       });
+
+      // 🧪 TEST INTERFACE (For User Verification)
+      window.addEventListener("__pa_test_autoreply__", (e) => {
+        const { name, text } = e.detail || {};
+        if (name) {
+          console.log(`🧪 [Test] Triggering manual auto-reply test for: ${name}`);
+          processAutoReply(name, text || "🧪 Test Auto-Reply: System Functional.");
+        }
+      });
+
     } catch (e) {
       contextAlive = false;
     }
+  }
+
+  // 🤖 SMART AUTO-REPLY (DOM-LEVEL AUTOMATION)
+  function getInputBox() {
+    // 🌍 PLATFORM SPECIFIC SELECTORS (Higer Resilience)
+    const selectors = [
+      "div[contenteditable='true'][data-tab='10']", // WhatsApp
+      "div[aria-label='Type a message']",           // WhatsApp En
+      "div[aria-label='Type a message ']",          // WhatsApp En (Space)
+      "div[aria-label='Type a message…']",         // WhatsApp En (Dots)
+      "footer .selectable-text",                    // WhatsApp Secondary
+      ".msg-form__contenteditable",                 // LinkedIn
+      "div[role='textbox']",                        // Generalized Messenger/Slack
+      "div[aria-label='Message Body']",             // Gmail
+      "div[contenteditable='true']"                 // Final Generic Fallback
+    ];
+    for (const s of selectors) {
+      const els = document.querySelectorAll(s);
+      for (const el of els) {
+        // Must be visible, clickable, and not a massive text block
+        if (el && el.offsetParent !== null && el.innerText.length < 100) return el;
+      }
+    }
+    return null;
+  }
+
+  function getSendButton() {
+    const selectors = [
+      "span[data-icon='send']",                      // WhatsApp Primary
+      "button[aria-label='Send']",                  // WhatsApp/Messenger Alternates
+      "button[aria-label='Enviar']",                // Localized Es/Pt
+      ".msg-form__send-button",                     // LinkedIn
+      "div[aria-label='Send']",                      // Messenger Primary
+      ".T-I.J-J5-Ji.aoO.v7.T-I-atl.L3"             // Gmail Send
+    ];
+    for (const s of selectors) {
+      const btn = document.querySelector(s);
+      if (btn && btn.offsetParent !== null) {
+        return btn.tagName === "BUTTON" ? btn : btn.closest("button") || btn;
+      }
+    }
+    return null;
+  }
+
+  async function typeMessage(inputBox, text) {
+    if (!inputBox) return false;
+    inputBox.focus();
+    // Simulate user-like typing
+    document.execCommand('insertText', false, text);
+    return true;
+  }
+
+  async function processAutoReply(senderName, replyText) {
+    console.log(`🤖 [Auto-Reply] Heavy-duty trigger for: ${senderName}...`);
+
+    // 1. 🎯 High-Fidelity Chat Selection
+    const spans = Array.from(document.querySelectorAll("span[title]"));
+    const targetSpan = spans.find(s => s.title === senderName);
+    if (targetSpan) {
+       const row = targetSpan.closest("div[role='row']") || targetSpan.closest("div[role='button']");
+       if (row) {
+          console.log("🖱️ [Auto-Reply] Clicking chat row...");
+          row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+          row.click();
+       }
+    }
+
+    // 2. 🛡️ RESILIENT POLLING LOOP
+    let attempts = 0;
+    const maxAttempts = 15; // 7.5 seconds total
+    
+    const pollInterval = setInterval(async () => {
+      attempts++;
+      const inputBox = getInputBox();
+      
+      if (inputBox) {
+        clearInterval(pollInterval);
+        console.log(`🎯 [Auto-Reply] Input found (${attempts} attempts). Focus and Type...`);
+        
+        inputBox.focus();
+        const success = await typeMessage(inputBox, replyText);
+        
+        if (success) {
+          // 3. Wait for send button to activate
+          setTimeout(() => {
+            const sendBtn = getSendButton();
+            if (sendBtn) {
+              console.log("🚀 [Auto-Reply] Dispatching message!");
+              sendBtn.click();
+            } else {
+              // Fallback: Trigger 'Enter' key
+              console.warn("⚠️ [Auto-Reply] Send button missing, trying Enter key fallback...");
+              inputBox.dispatchEvent(new KeyboardEvent("keydown", {
+                bubbles: true, cancelable: true, keyCode: 13, key: "Enter"
+              }));
+            }
+          }, 800);
+        }
+      } else if (attempts >= maxAttempts) {
+        clearInterval(pollInterval);
+        console.error(`🚫 [Auto-Reply] FAILED: Input box not found for ${senderName}. Try refreshing tab.`);
+      }
+    }, 500);
   }
 
   // -----------------------------------------------------------
@@ -279,11 +398,11 @@
 
       // 2. Fire proxy blocked event for the dashboard counter
       safeSendMessage({
-        type: "NOTIFICATION_BLOCKED",
+        type: "NOTIFICATION_EVENT",
         data: {
           url: window.location.href,
-          hostname: window.location.hostname,
-          title: "Background Push (Hidden)",
+          status: "blocked",
+          title: "Silent Notification", // We scrubbed the title, so we label it
           body: "A background notification was silenced",
           source: "title_observer",
           timestamp: new Date().toISOString(),
@@ -293,12 +412,67 @@
   });
 
   // -----------------------------------------------------------
-  // 📨 PLATFORM SCRAPERS
+  // 📨 PRODUCTION DOM SCRAPER (Production Spec Step 5)
+  // Extracts emergency signals directly from page content
+  // -----------------------------------------------------------
+  function normalizeText(text) {
+    if (!text) return "";
+    return text.toLowerCase().replace(/[^\w\s]/g, "").trim();
+  }
+
+  function isUrgent(text) {
+    const normalized = normalizeText(text);
+    const urgentKws = [
+      "urgent", "emergency", "asap", "immediately", "right now", 
+      "call me", "important", "fast", "now", "as soon as possible"
+    ];
+    return urgentKws.some(kw => normalized.includes(kw));
+  }
+
+  function extractMessageText() {
+    // 1. Generic safety check (reads visible text)
+    const pageText = document.body.innerText || "";
+    if (isUrgent(pageText.slice(-500))) { // Check recent text additions
+       return { found: true, content: pageText.slice(-200) };
+    }
+    return { found: false };
+  }
+
+  // 🕵️ DOM Mutation Observer for real-time extraction (WhatsApp/Gmail)
+  const domObserver = new MutationObserver((mutations) => {
+    if (!contextAlive || !isContextValid() || !focusModeActive) return;
+
+    for (const mutation of mutations) {
+      if (mutation.addedNodes.length > 0) {
+        mutation.addedNodes.forEach(node => {
+          const text = node.innerText || node.textContent || "";
+          if (text.length > 3 && isUrgent(text)) {
+            console.log("🆘 [DOM Observer] Crisis signal detected in page content!");
+            safeSendMessage({
+              type: "NOTIFICATION_EVENT",
+              data: {
+                status: "allowed",
+                title: "Crisis Extraction",
+                body: text,
+                source: "dom_observer",
+                timestamp: new Date().toISOString()
+              }
+            });
+          }
+        });
+      }
+    }
+  });
+
+  if (document.body) {
+    domObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  // -----------------------------------------------------------
+  // 📨 PLATFORM SCRAPERS (Specific)
   // -----------------------------------------------------------
   function scrapeWhatsApp() {
     if (!window.location.hostname.includes("whatsapp.com")) return;
-    
-    // Select the chat list items
     const chatElements = document.querySelectorAll("div[aria-label='Chat list'] > div");
     const chats = [];
 
@@ -456,6 +630,55 @@
     }
   }
 
+  // 📸 INSTAGRAM AUTOMATION (DOM-LEVEL)
+  async function automateInstagramMute(targetName) {
+    if (!window.location.hostname.includes("instagram.com")) return;
+    console.log(`🤖 [Automation] Starting Instagram mute sequence for: "${targetName}"...`);
+
+    try {
+        // 1. Find the chat row
+        const labels = Array.from(document.querySelectorAll('span[dir="auto"]'));
+        const targetLabel = labels.find(l => l.innerText === targetName);
+        const row = targetLabel?.closest('div[role="button"][style*="height"]');
+
+        if (!row) {
+            console.warn(`🕵️ Instagram chat "${targetName}" not found. Ensure inbox is open.`);
+            return;
+        }
+
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
+        await new Promise(r => setTimeout(r, 400));
+
+        // 2. Trigger context menu (Right click)
+        const rect = row.getBoundingClientRect();
+        row.dispatchEvent(new MouseEvent("contextmenu", {
+            bubbles: true, cancelable: true, view: window, button: 2, buttons: 2,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+        }));
+
+        await new Promise(r => setTimeout(r, 600));
+
+        // 3. Find "Mute messages"
+        const menuItems = Array.from(document.querySelectorAll('div[role="dialog"] button, span'));
+        const muteBtn = menuItems.find(i => i.innerText.toLowerCase().includes("mute messages"));
+
+        if (muteBtn) {
+            console.log("✅ [Automation] Found Mute messages, clicking...");
+            muteBtn.click();
+            
+            // 4. Confirm Mute (Instagram usually has a sub-dialog or immediate action)
+            await new Promise(r => setTimeout(r, 600));
+            const confirmBtn = Array.from(document.querySelectorAll('button')).find(b => 
+                b.innerText.toLowerCase().includes("mute") && !b.innerText.toLowerCase().includes("cancel")
+            );
+            if (confirmBtn) confirmBtn.click();
+        }
+    } catch (e) {
+        console.error("❌ [IG Automation] ERROR", e);
+    }
+  }
+
   function scrapeGmail() {
     if (!window.location.hostname.includes("mail.google.com")) return;
 
@@ -485,10 +708,11 @@
   }
 
   // 👁️ LIVE MUTATION OBSERVER (Instant Dashboard Sync)
+  let scrapeTimeout = null;
   const chatListObserver = new MutationObserver(() => {
     // Throttled scrape to avoid performance hits on rapid typing
-    if (this._scrapeTimeout) clearTimeout(this._scrapeTimeout);
-    this._scrapeTimeout = setTimeout(scrapeWhatsApp, 500);
+    if (scrapeTimeout) clearTimeout(scrapeTimeout);
+    scrapeTimeout = setTimeout(scrapeWhatsApp, 500);
   });
 
   function startChatObserver() {
@@ -501,6 +725,41 @@
       setTimeout(startChatObserver, 5000);
     }
   }
+  // -----------------------------------------------------------
+  // 📸 INSTAGRAM SCRAPER (Real-Time DM Sync)
+  // -----------------------------------------------------------
+  function scrapeInstagram() {
+    if (!window.location.hostname.includes("instagram.com")) return;
+    if (!contextAlive || !isContextValid()) return;
+
+    // We look for elements that look like chat row items in the inbox
+    // IG UI changes often, so we use broad selectors
+    const chatRows = document.querySelectorAll('div[role="button"][style*="height"]');
+    const chats = [];
+
+    chatRows.forEach(row => {
+      try {
+        const nameNode = row.querySelector('span[dir="auto"]');
+        const previewNode = row.querySelector('span[style*="color: rgb(142, 142, 142)"]'); // grey text
+        
+        if (nameNode) {
+          chats.push({
+            id: `ig-${nameNode.innerText.replace(/\s+/g, '-').toLowerCase()}`,
+            name: nameNode.innerText,
+            displayName: nameNode.innerText,
+            lastAction: previewNode ? previewNode.innerText : "Active thread",
+            count: 0, // Injected via observer if needed
+            muted: false, 
+            lastSynced: new Date().toISOString()
+          });
+        }
+      } catch (e) {}
+    });
+
+    if (chats.length > 0) {
+      safeSendMessage({ type: "UPDATE_INSTAGRAM_CHATS", chats });
+    }
+  }
 
   // Run scrapers logic
   registerInterval(() => {
@@ -508,6 +767,7 @@
     // WhatsApp is now handled by observer for "new messages", 
     // but we still poll occasionally to refresh unread counts/visuals
     scrapeWhatsApp(); 
+    scrapeInstagram(); 
   }, 10000);
 
   startChatObserver();

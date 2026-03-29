@@ -3,14 +3,19 @@ const express = require('express');
 module.exports = function(store) {
   const router = express.Router();
 
+  const { GoogleAuth } = require('../models/db');
+  
   // GET current config & mode
-  router.get('/status', (req, res) => {
+  router.get('/status', async (req, res) => {
+    const auth = await GoogleAuth.findOne().lean();
     res.json({
       activeMode: store.getCurrentMode(),
       schedulerEnabled: store.getSchedulerEnabled(),
       schedules: store.getSchedules(),
       calendarEvents: store.getCalendarEvents(),
-      manualOverride: store.getManualOverride()
+      manualOverride: store.getManualOverride(),
+      googleLinked: !!auth,
+      googleEmail: auth ? auth.email : null
     });
   });
 

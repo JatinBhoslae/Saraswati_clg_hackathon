@@ -14,8 +14,9 @@
 
   function _logBlocked(title, options, source = "unknown") {
     window.dispatchEvent(
-      new CustomEvent("__pa_notif_blocked__", {
+      new CustomEvent("__pa_notif_event__", {
         detail: {
+          status: "blocked",
           title: title,
           body: (options && options.body) || "",
           source: source,
@@ -25,18 +26,43 @@
     console.log(`🔕 [Productivity Assistant] Blocked (${source}):`, title);
   }
 
+  function _logAllowed(title, options, source = "priority") {
+    window.dispatchEvent(
+      new CustomEvent("__pa_notif_event__", {
+        detail: {
+          status: "allowed",
+          title: title,
+          body: (options && options.body) || "",
+          source: source,
+        },
+      })
+    );
+    console.log(`💎 [Productivity Assistant] Allowed (${source}):`, title);
+  }
+
   // === 1. Override window.Notification ===
   const _OrigNotification = window.Notification;
   
   function _SilentNotification(title, options) {
     // 1. Check for PRIORITY BYPASS (My logic: Senior Spec Step 4)
-    const isPriority = _priorityKeywords.some(kw => 
-      title.toLowerCase().includes(kw.toLowerCase()) || 
-      (options && options.body && options.body.toLowerCase().includes(kw.toLowerCase()))
-    );
+    const cleanTitle = (title || "").toLowerCase().trim();
+    const cleanBody = (options && options.body ? options.body.toLowerCase().trim() : "");
+    
+    const isPriority = _priorityKeywords.some(rawKw => {
+      const kw = rawKw.toLowerCase().trim();
+      return kw && (cleanTitle.includes(kw) || cleanBody.includes(kw));
+    });
 
-    if (isPriority) {
-        console.log("💎 [Priority Mode] Delivering Whitelisted Persona:", title);
+    // 🆘 CRISIS OVERRIDE:
+    const detectUrgency = (t, b) => {
+        const text = (t + " " + (b || "")).toLowerCase().replace(/[^\w\s]/g, "");
+        const urgentKws = ["urgent", "emergency", "asap", "immediately", "right now", "call me", "important", "fast", "as soon as possible", "plz call now", "call now"];
+        return urgentKws.some(kw => text.includes(kw));
+    };
+    const isUrgent = detectUrgency(title, options?.body);
+
+    if (isUrgent || isPriority) {
+        _logAllowed(title, options, isUrgent ? "urgent" : "priority");
         return new _OrigNotification(title, options);
     }
 

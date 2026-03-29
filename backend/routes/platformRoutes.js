@@ -29,9 +29,9 @@ module.exports = function(store) {
   });
 
   router.post("/whatsapp/mute", (req, res) => {
-    const { name } = req.body;
+    const { name, muteStartTime, muteEndTime, muteDays, muteType } = req.body;
     if (name) {
-      store.muteWhatsAppChat(name);
+      store.muteWhatsAppChat(name, { muteStartTime, muteEndTime, muteDays, muteType });
       res.json({ status: "success" });
     } else {
       res.status(400).json({ error: "name required" });

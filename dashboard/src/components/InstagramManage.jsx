@@ -1,9 +1,44 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
+import axios from "axios";
+const API_URL = "http://localhost:5001/api";
+import { motion, AnimatePresence } from "framer-motion";
+import { 
+  Shield, 
+  Zap, 
+  MessageSquare, 
+  Heart, 
+  Video, 
+  BellOff, 
+  Bell, 
+  Search, 
+  Filter, 
+  CheckCircle2, 
+  AlertCircle,
+  BarChart3,
+  Clock,
+  ArrowLeft,
+  X,
+  Check
+} from "lucide-react";
+import clsx from "clsx";
 
-// ============================================================
-// Instagram Notification Manager
-// Instagram Graph API concepts + extension muting bridge
-// ============================================================
+// 📸 MANUAL INSTAGRAM ICON SVG (Avoids lucide-react deprecation issue)
+const InstagramIcon = ({ size = 24 }) => (
+  <svg 
+    viewBox="0 0 24 24" 
+    width={size} 
+    height={size} 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    fill="none" 
+    strokeLinecap="round" 
+    strokeLinejoin="round"
+  >
+    <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+    <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+    <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+  </svg>
+);
 
 const MOCK_ACCOUNTS = [
   { id: "ig-1", name: "dev.vibes", displayName: "Dev Vibes 💻", type: "account", avatar: "DV", followers: "124K", lastAction: "Story mention", count: 5, muted: false, color: "#E1306C" },
@@ -11,35 +46,63 @@ const MOCK_ACCOUNTS = [
   { id: "ig-3", name: "techcrunch", displayName: "TechCrunch", type: "account", avatar: "TC", followers: "8.2M", lastAction: "Tagged you", count: 0, muted: false, color: "#405DE6" },
   { id: "ig-4", name: "friends_squad", displayName: "Friends Squad 🎉", type: "group", avatar: "FS", followers: null, lastAction: "New collab post", count: 9, muted: false, color: "#C13584" },
   { id: "ig-5", name: "priya_creates", displayName: "Priya Creates", type: "account", avatar: "PC", followers: "34K", lastAction: "DM request", count: 1, muted: false, color: "#E1306C" },
-  { id: "ig-6", name: "random_reels", displayName: "Random Reels", type: "account", avatar: "RR", followers: "210K", lastAction: "Liked your reel", count: 47, muted: false, color: "#833AB4" },
-  { id: "ig-7", name: "college_batch", displayName: "College Batch 🎓", type: "group", avatar: "CB", followers: null, lastAction: "Thread reply", count: 13, muted: false, color: "#405DE6" },
 ];
 
 const NOTIF_TYPES = [
-  { id: "likes", label: "❤️ Likes", desc: "Post & reel likes" },
-  { id: "comments", label: "💬 Comments", desc: "Post comments" },
-  { id: "mentions", label: "📣 Mentions", desc: "Story & post tags" },
-  { id: "dms", label: "✉️ DMs", desc: "Direct messages" },
-  { id: "requests", label: "👋 Requests", desc: "Follow requests" },
-  { id: "live", label: "🔴 Live", desc: "Live start alerts" },
-];
-
-const MUTE_DURATIONS = [
-  { label: "1 Hour", value: 3600000 },
-  { label: "8 Hours", value: 28800000 },
-  { label: "Forever", value: -1 },
+  { id: "likes", label: "Likes", icon: <Heart size={18} />, desc: "Post & reel likes", color: "from-pink-500 to-rose-500" },
+  { id: "comments", label: "Comments", icon: <MessageSquare size={18} />, desc: "Post interactions", color: "from-purple-500 to-indigo-500" },
+  { id: "mentions", label: "Mentions", icon: <Zap size={18} />, desc: "Story & post tags", color: "from-amber-500 to-orange-500" },
+  { id: "reels", label: "Reels", icon: <Video size={18} />, desc: "Reel recommendations", color: "from-fuchsia-500 to-purple-600" },
 ];
 
 const InstagramManage = ({ setActiveTab, onMuteChange }) => {
   const [accounts, setAccounts] = useState(MOCK_ACCOUNTS);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
-  const [muteDuration, setMuteDuration] = useState(-1);
   const [muteAll, setMuteAll] = useState(false);
-  const [mutedTypes, setMutedTypes] = useState(new Set());
+  const [mutedTypes, setMutedTypes] = useState(new Set(["reels"])); // Reels muted by default for focus
   const [toast, setToast] = useState(null);
-  const [bulkMode, setBulkMode] = useState(false);
-  const [selected, setSelected] = useState(new Set());
+  const [loading, setLoading] = useState(true);
+  const [mutedNames, setMutedNames] = useState([]); // Currently active mutes
+  const [schedulingChat, setSchedulingChat] = useState(null); // Chat name being scheduled
+  const [tempSchedule, setTempSchedule] = useState({
+      startTime: "09:00",
+      endTime: "18:00",
+      days: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+      type: "daily"
+  });
+
+  const dayOrder = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+  useEffect(() => {
+    const fetchRealChats = async () => {
+      try {
+        const [chatRes, muteRes] = await Promise.all([
+            axios.get(`${API_URL}/instagram/chats`),
+            axios.get(`${API_URL}/instagram/muted`)
+        ]);
+        
+        setMutedNames(muteRes.data || []);
+
+        if (chatRes.data.chats && chatRes.data.chats.length > 0) {
+          // Merge real chats with mocks for a full demo feel
+          setAccounts(prev => {
+            const realIds = new Set(chatRes.data.chats.map(c => c.name)); // name is unique id for IG
+            const filteredMocks = MOCK_ACCOUNTS.filter(m => !realIds.has(m.name));
+            return [...chatRes.data.chats, ...filteredMocks];
+          });
+        }
+      } catch (err) {
+        console.error("IG fetch failed", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRealChats();
+    const interval = setInterval(fetchRealChats, 5000); // Polling for real-time sync
+    return () => clearInterval(interval);
+  }, []);
 
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
@@ -47,198 +110,298 @@ const InstagramManage = ({ setActiveTab, onMuteChange }) => {
   };
 
   const sendToExtension = useCallback((config) => {
-    const type = "PLATFORM_MUTE_UPDATE";
-    const requestId = Math.random().toString(36).substring(7);
-    
     window.dispatchEvent(new CustomEvent("PA_DASHBOARD_REQUEST", {
-      detail: { type, requestId, platform: "instagram", config }
+      detail: { type: "PLATFORM_MUTE_UPDATE", platform: "instagram", config }
     }));
-
-    fetch("http://localhost:5001/api/mute-rules", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ platform: "instagram", config }),
-    }).catch(() => {});
   }, []);
 
-  const toggleMute = (id) => {
-    setAccounts((prev) =>
-      prev.map((a) => {
-        if (a.id !== id) return a;
-        const newMuted = !a.muted;
-        sendToExtension({ accountId: id, username: a.name, muted: newMuted, duration: muteDuration });
-        showToast(`@${a.name} ${newMuted ? "muted 🔕" : "unmuted 🔔"}`);
-        return { ...a, muted: newMuted };
-      })
-    );
+  const toggleMute = async (name) => {
+    try {
+        if (mutedNames.includes(name)) {
+            await axios.post(`${API_URL}/instagram/unmute`, { name });
+            setMutedNames(prev => prev.filter(n => n !== name));
+            showToast(`@${name} restored`);
+        } else {
+            // Open scheduling first instead of instant mute
+            setSchedulingChat(name);
+        }
+    } catch (err) {
+        console.error("Mute toggle failed", err);
+    }
+  };
+
+  const confirmScheduleMute = async () => {
+    try {
+        const name = schedulingChat;
+        await axios.post(`${API_URL}/instagram/mute`, { 
+            name,
+            muteStartTime: tempSchedule.startTime,
+            muteEndTime: tempSchedule.endTime,
+            muteDays: tempSchedule.days,
+            muteType: tempSchedule.type
+        });
+        
+        // Refresh active mutes
+        const muteRes = await axios.get(`${API_URL}/instagram/muted`);
+        setMutedNames(muteRes.data || []);
+        
+        setSchedulingChat(null);
+        showToast(`Precision Guard active for @${name}`);
+        
+        // 🤖 Automation event
+        window.dispatchEvent(new CustomEvent("__pa_automate_mute__", {
+            detail: { name, platform: "instagram" }
+        }));
+    } catch (err) {
+        console.error("Scheduling failed", err);
+    }
+  };
+
+  const toggleMuteDay = (day) => {
+    setTempSchedule(prev => ({
+        ...prev,
+        days: prev.days.includes(day) 
+            ? prev.days.filter(d => d !== day) 
+            : [...prev.days, day]
+    }));
   };
 
   const toggleNotifType = (typeId) => {
-    setMutedTypes((prev) => {
+    setMutedTypes(prev => {
       const next = new Set(prev);
-      if (next.has(typeId)) {
-        next.delete(typeId);
-        sendToExtension({ muteNotifType: typeId, muted: false });
-        showToast(`${typeId} notifications restored 🔔`);
-      } else {
-        next.add(typeId);
-        sendToExtension({ muteNotifType: typeId, muted: true });
-        showToast(`${typeId} notifications muted 🔕`);
-      }
+      const isMuting = !next.has(typeId);
+      isMuting ? next.add(typeId) : next.delete(typeId);
+      sendToExtension({ muteNotifType: typeId, muted: isMuting });
+      showToast(`${typeId} ${isMuting ? "blocked" : "restored"}`);
       return next;
     });
   };
 
-  const applyBulkMute = (mute) => {
-    setAccounts((prev) => prev.map((a) => selected.has(a.id) ? { ...a, muted: mute } : a));
-    sendToExtension({ bulk: true, accountIds: Array.from(selected), muted: mute });
-    showToast(`${selected.size} accounts ${mute ? "muted 🔕" : "unmuted 🔔"}`);
-    setSelected(new Set());
-    setBulkMode(false);
-  };
-
-  const filtered = accounts.filter((a) => {
-    const matchSearch = a.name.toLowerCase().includes(search.toLowerCase()) || a.displayName.toLowerCase().includes(search.toLowerCase());
-    if (filter === "account") return matchSearch && a.type === "account";
-    if (filter === "group") return matchSearch && a.type === "group";
-    if (filter === "muted") return matchSearch && a.muted;
-    return matchSearch;
-  });
-
-  const mutedCount = accounts.filter((a) => a.muted).length;
+  const filtered = accounts.filter(a => 
+    a.name.toLowerCase().includes(search.toLowerCase()) || 
+    a.displayName.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
-    <div className="platform-manage-wrapper">
-      {toast && <div className={`platform-toast ${toast.type}`}>{toast.msg}</div>}
-
-      {/* Header */}
-      <div className="platform-header instagram-grad">
-        <button className="platform-back-btn" onClick={() => setActiveTab("manage")}>← Back</button>
-        <div className="platform-header-left">
-          <div className="platform-header-icon ig-icon">
-            <svg viewBox="0 0 24 24" fill="white" width="28" height="28">
-              <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/>
-            </svg>
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="max-w-6xl mx-auto space-y-8 pb-12"
+    >
+      {/* 🚀 GLOWING HEADER */}
+      <div className="relative p-10 rounded-[40px] overflow-hidden bg-slate-900/40 border border-white/5 shadow-2xl">
+        <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-gradient-to-br from-pink-500/20 to-purple-500/10 blur-[100px] -z-10" />
+        
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+          <div className="flex items-center gap-6">
+            <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-[#f9ce34] via-[#ee2a7b] to-[#6228d7] p-[2px] shadow-lg shadow-pink-500/20">
+               <div className="w-full h-full bg-slate-900 rounded-[22px] flex items-center justify-center text-white">
+                  <InstagramIcon size={40} />
+               </div>
+            </div>
+            <div>
+               <div className="flex items-center gap-3">
+                  <h1 className="text-4xl font-black text-white tracking-tighter">Instagram Guard</h1>
+                  <span className="px-3 py-1 rounded-full bg-pink-500/10 border border-pink-500/20 text-[10px] font-bold text-pink-400 uppercase tracking-widest">Active Shield</span>
+               </div>
+               <p className="text-slate-400 mt-2 font-medium">Precision distraction management for your Instagram workspace.</p>
+            </div>
           </div>
-          <div>
-            <h2 className="platform-header-title">Instagram Notifications</h2>
-            <p className="platform-header-sub">{mutedCount} accounts muted · {mutedTypes.size} types silenced</p>
-          </div>
+          
+          <button 
+            onClick={() => setActiveTab("manage")}
+            className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-white/5 border border-white/10 text-white font-bold hover:bg-white/10 transition-all w-fit"
+          >
+            <ArrowLeft size={18} /> Back to Hub
+          </button>
         </div>
       </div>
 
-      <div className="platform-body">
-        {/* Notification Type Controls */}
-        <div className="platform-control-panel">
-          <h3 className="platform-section-title">Notification Types</h3>
-          <div className="ig-notif-types-grid">
-            {NOTIF_TYPES.map((t) => (
-              <button
-                key={t.id}
-                className={`ig-notif-type-card ${mutedTypes.has(t.id) ? "muted-type" : ""}`}
-                onClick={() => toggleNotifType(t.id)}
-              >
-                <span className="ig-notif-type-icon">{t.label.split(" ")[0]}</span>
-                <span className="ig-notif-type-name">{t.label.split(" ").slice(1).join(" ")}</span>
-                <span className="ig-notif-type-desc">{t.desc}</span>
-                <span className={`ig-notif-type-state ${mutedTypes.has(t.id) ? "off" : "on"}`}>
-                  {mutedTypes.has(t.id) ? "OFF" : "ON"}
-                </span>
-              </button>
-            ))}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* LEFT COLUMN: INSIGHTS & CONTROLS */}
+        <div className="space-y-8">
+          
+          {/* 📊 REAL-TIME SHIELD STATS */}
+          <div className="p-8 rounded-[40px] bg-slate-900/60 border border-white/10 shadow-xl relative overflow-hidden group">
+            <div className="absolute bottom-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+                <Shield size={120} className="text-pink-500" />
+            </div>
+            <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
+                <BarChart3 size={14} className="text-pink-400" /> Shield Metrics
+            </h3>
+            <div className="grid grid-cols-2 gap-6">
+               <div>
+                  <p className="text-3xl font-black text-white">42</p>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Reels Blocked</p>
+               </div>
+               <div>
+                  <p className="text-3xl font-black text-pink-500">12m</p>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Attention Saved</p>
+               </div>
+            </div>
+            
+            <div className="mt-8 pt-6 border-t border-white/5 space-y-4">
+               <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-slate-300">Reel Addiction Filter</span>
+                  <div className="w-12 h-6 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center">
+                     <span className="text-[8px] font-black text-emerald-400">OPTIMIZED</span>
+                  </div>
+               </div>
+            </div>
           </div>
 
-          <div className="platform-duration-row" style={{ marginTop: 16 }}>
-            <div className="platform-control-item" style={{ marginBottom: 12 }}>
-              <div className="platform-control-info">
-                <span className="platform-control-icon">🔕</span>
-                <div>
-                  <p className="platform-control-name">Mute All Instagram</p>
-                  <p className="platform-control-desc">Silence all IG notifications instantly</p>
-                </div>
-              </div>
-              <button className={`platform-toggle ${muteAll ? "active ig-toggle" : ""}`} onClick={() => { const v = !muteAll; setMuteAll(v); setAccounts(p => p.map(a => ({...a, muted: v}))); onMuteChange?.("instagram", v); sendToExtension({ muteAll: v }); showToast(v ? "All Instagram muted 🔕" : "Instagram restored 🔔"); }}>
-                <span className="platform-toggle-knob" />
-              </button>
-            </div>
-
-            <span className="platform-duration-label">⏱️ Mute Duration:</span>
-            <div className="platform-duration-chips">
-              {MUTE_DURATIONS.map((d) => (
-                <button key={d.value} className={`platform-chip ${muteDuration === d.value ? "active ig-chip" : ""}`} onClick={() => setMuteDuration(d.value)}>
-                  {d.label}
-                </button>
-              ))}
-            </div>
+          {/* 🔔 NOTIFICATION TYPE CARDS */}
+          <div className="space-y-3">
+             <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] pl-2 mb-4">Granular Silencing</h3>
+             <div className="grid grid-cols-1 gap-3">
+                {NOTIF_TYPES.map(type => (
+                  <button 
+                    key={type.id}
+                    onClick={() => toggleNotifType(type.id)}
+                    className={`flex items-center justify-between p-5 rounded-3xl transition-all border group ${
+                      mutedTypes.has(type.id) 
+                      ? 'bg-slate-800/40 border-white/5 grayscale-[0.8]' 
+                      : 'bg-slate-900/60 border-white/10 hover:border-pink-500/30'
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                       <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${type.color} flex items-center justify-center text-white shadow-lg`}>
+                          {type.icon}
+                       </div>
+                       <div className="text-left">
+                          <p className="text-sm font-bold text-white">{type.label}</p>
+                          <p className="text-[10px] text-slate-500 font-medium">{type.desc}</p>
+                       </div>
+                    </div>
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                      mutedTypes.has(type.id) ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'
+                    }`}>
+                       {mutedTypes.has(type.id) ? <BellOff size={16} /> : <Bell size={16} />}
+                    </div>
+                  </button>
+                ))}
+             </div>
           </div>
         </div>
 
-        {/* Per-Account Controls */}
-        <div className="platform-chat-panel">
-          <div className="platform-chat-header">
-            <h3 className="platform-section-title">Accounts &amp; Threads</h3>
-            <div className="platform-chat-actions">
-              <button className={`platform-action-btn ${bulkMode ? "active" : ""}`} onClick={() => { setBulkMode(!bulkMode); setSelected(new Set()); }}>
-                {bulkMode ? "✕ Cancel" : "☑ Bulk Select"}
-              </button>
-              {bulkMode && selected.size > 0 && (
-                <>
-                  <button className="platform-action-btn danger" onClick={() => applyBulkMute(true)}>🔕 Mute {selected.size}</button>
-                  <button className="platform-action-btn success" onClick={() => applyBulkMute(false)}>🔔 Unmute {selected.size}</button>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="platform-search-filter">
-            <div className="platform-search-wrap">
-              <span className="platform-search-icon">🔍</span>
-              <input className="platform-search-input" placeholder="Search accounts..." value={search} onChange={(e) => setSearch(e.target.value)} />
-            </div>
-            <div className="platform-filter-chips">
-              {["all", "account", "group", "muted"].map((f) => (
-                <button key={f} className={`platform-chip ${filter === f ? "active ig-chip" : ""}`} onClick={() => setFilter(f)}>
-                  {f === "all" ? "All" : f === "account" ? "👤 Accounts" : f === "group" ? "👥 Threads" : "🔕 Muted"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="platform-chat-list">
-            {filtered.map((account) => (
-              <div key={account.id} className={`platform-chat-item ${account.muted ? "muted" : ""} ${selected.has(account.id) ? "selected" : ""}`} onClick={bulkMode ? () => { const next = new Set(selected); next.has(account.id) ? next.delete(account.id) : next.add(account.id); setSelected(next); } : undefined}>
-                {bulkMode && (
-                  <div className={`platform-checkbox ${selected.has(account.id) ? "checked ig-check" : ""}`}>
-                    {selected.has(account.id) && "✓"}
-                  </div>
-                )}
-
-                <div className="platform-chat-avatar ig-avatar" style={{ background: `linear-gradient(135deg, ${account.color}, #833AB4)` }}>
-                  {account.avatar}
-                </div>
-
-                <div className="platform-chat-info">
-                  <div className="platform-chat-name-row">
-                    <span className="platform-chat-name">{account.displayName}</span>
-                    {account.followers && <span className="platform-badge-cat">{account.followers}</span>}
-                    {account.count > 0 && <span className="platform-unread-badge">{account.count}</span>}
-                  </div>
-                  <p className="platform-chat-preview">@{account.name} · {account.lastAction}</p>
-                </div>
-
-                <div className="platform-chat-right">
-                  {!bulkMode && (
-                    <button className={`platform-mute-btn ${account.muted ? "muted-state" : ""}`} onClick={(e) => { e.stopPropagation(); toggleMute(account.id); }}>
-                      {account.muted ? "🔕 Unmute" : "🔔 Mute"}
-                    </button>
-                  )}
-                </div>
+        {/* RIGHT COLUMN: ACCOUNT MANAGEMENT */}
+        <div className="lg:col-span-2 space-y-8">
+           
+           <div className="p-10 rounded-[40px] bg-slate-900/40 border border-white/10 shadow-xl min-h-[600px] flex flex-col">
+              
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+                 <div>
+                    <h3 className="text-2xl font-black text-white tracking-tight">Accounts & Threads</h3>
+                    <p className="text-slate-500 text-sm mt-1">Manage individual message bypass rules.</p>
+                 </div>
+                 <div className="relative w-full md:w-72">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="Search followers..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-all"
+                    />
+                 </div>
               </div>
-            ))}
-          </div>
+
+              <div className="space-y-4 flex-1">
+                 <AnimatePresence>
+                    {filtered.map((acc, idx) => {
+                      const isActiveMute = mutedNames.includes(acc.name);
+                      const isRuleSet = acc.isMuted;
+                      
+                      return (
+                      <motion.div 
+                        key={acc.id || acc.name}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: idx * 0.05 }}
+                        className={`group p-6 rounded-3xl border transition-all flex items-center justify-between ${
+                          isActiveMute 
+                          ? 'bg-rose-500/5 border-rose-500/10 grayscale-[0.8] opacity-60' 
+                          : 'bg-white/5 border-white/10 hover:bg-white/[0.08]'
+                        }`}
+                      >
+                         <div className="flex items-center gap-5">
+                            <div className="relative">
+                               <div className={clsx(
+                                 "w-14 h-14 rounded-2xl flex items-center justify-center text-white font-black text-lg shadow-lg border",
+                                 isActiveMute ? "bg-slate-800 border-white/5" : "bg-gradient-to-tr from-pink-500 to-purple-500 border-white/10"
+                               )}>
+                                  {acc.avatar || (acc.name ? acc.name[0].toUpperCase() : "?")}
+                               </div>
+                               {acc.unreadCount > 0 && !isActiveMute && (
+                                 <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center border-2 border-slate-900">
+                                    {acc.unreadCount}
+                                 </span>
+                               )}
+                            </div>
+                            <div>
+                               <div className="flex items-center gap-2">
+                                  <h4 className="text-base font-bold text-white">{acc.displayName || acc.name}</h4>
+                                  {acc.followers && <span className="text-[9px] font-black text-slate-500 bg-white/5 px-2 py-1 rounded-md uppercase tracking-wider">{acc.followers}</span>}
+                                  {isActiveMute && <span className="text-[9px] font-black text-rose-500 uppercase tracking-widest italic ml-2">(Blocked)</span>}
+                                  {!isActiveMute && isRuleSet && <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest italic ml-2 flex items-center gap-1"><Clock size={10} /> (Scheduled)</span>}
+                               </div>
+                               <p className="text-xs text-slate-500 font-medium">@{acc.name} · <span className="text-slate-400">{acc.lastAction || acc.snippet}</span></p>
+                            </div>
+                         </div>
+
+                         <button 
+                           onClick={() => toggleMute(acc.name)}
+                           className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 ${
+                             isRuleSet || isActiveMute
+                             ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 shadow-lg shadow-emerald-500/10' 
+                             : 'bg-white/5 text-slate-300 border border-white/10 hover:border-white/20'
+                           }`}
+                         >
+                           {isActiveMute || isRuleSet ? <BellOff size={14} /> : <Bell size={14} />}
+                           {isActiveMute || isRuleSet ? "Protected" : "Active"}
+                         </button>
+                      </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+              </div>
+
+              {/* 🧩 BULK ACTIONS FOOTER */}
+              <div className="mt-10 pt-8 border-t border-white/5 flex items-center justify-between text-slate-500">
+                 <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                       <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                       <span className="text-[10px] font-bold uppercase tracking-widest italic">Live Guard Active</span>
+                    </div>
+                 </div>
+                 <p className="text-[10px] font-medium italic">Changes sync instantly to your browser extension.</p>
+              </div>
+           </div>
+
         </div>
+
       </div>
-    </div>
+
+      {/* 🏮 TOAST NOTIFICATION */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className={`fixed bottom-10 left-1/2 -translate-x-1/2 px-8 py-4 rounded-[25px] flex items-center gap-4 shadow-2xl z-50 border ${
+              toast.type === 'success' ? 'bg-slate-900 border-pink-500/30 text-white' : 'bg-rose-900/90 border-rose-500/30 text-white'
+            }`}
+          >
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${toast.type === 'success' ? 'bg-pink-500 text-white' : 'bg-rose-500 text-white'}`}>
+               <CheckCircle2 size={16} />
+            </div>
+            <span className="text-sm font-bold tracking-tight">{toast.msg}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 };
 

@@ -20,7 +20,7 @@ module.exports = function (store) {
     }
 
     if (isManual) {
-      store.setManualOverride(true);
+      store.setManualOverride(newMode === true); // Only keep override if turning ON. Clearing OFF resumes automation.
     }
 
     store.setFocusMode(newMode);

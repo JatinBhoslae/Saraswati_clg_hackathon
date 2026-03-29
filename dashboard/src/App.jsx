@@ -35,6 +35,7 @@ import GlassCard from "./components/GlassCard";
 import PresetsPage from "./components/PresetsPage";
 import PresetDetailPage from "./components/PresetDetailPage";
 import WhatsAppBridge from "./components/WhatsAppBridge";
+import FocusRecoveryModal from "./components/FocusRecoveryModal"; // 🛡️ NEW
 
 // Premium Sound Engine
 const playSound = (type) => {
@@ -96,6 +97,7 @@ function App() {
     focusMode: false,
     activityByHour: [],
     pieData: [],
+    googleInfo: { linked: false, email: null },
     gamification: {
       xp: 0,
       level: 1,
@@ -111,6 +113,9 @@ function App() {
   const [suggestions, setSuggestions] = useState([]);
   const [customBlockedSites, setCustomBlockedSites] = useState([]);
   const [priorityKeywords, setPriorityKeywords] = useState([]);
+  const [showRecovery, setShowRecovery] = useState(false); // 🛡️ NEW
+  const [lastDigest, setLastDigest] = useState(null); // 🛡️ NEW
+  const [prevFocusMode, setPrevFocusMode] = useState(false); // 🛡️ Tracking for transition
 
   useEffect(() => {
     const fetchData = async () => {
@@ -130,6 +135,15 @@ function App() {
         setSuggestions(suggRes.data.suggestions);
         setCustomBlockedSites(sitesRes.data.sites || []);
         setPriorityKeywords(kwRes.data.keywords || []);
+
+        // 🛡️ RECOVERY VAULT LOGIC: Detect Focus OFF transition
+        const newFocusMode = statsRes.data.focusMode;
+        if (prevFocusMode && !newFocusMode && statsRes.data.lastDigest) {
+          console.log("🏆 Focusing ended! Showing Recovery Vault...");
+          setLastDigest(statsRes.data.lastDigest);
+          setShowRecovery(true);
+        }
+        setPrevFocusMode(newFocusMode);
       } catch (err) {
         console.error("Error fetching data", err);
       } finally {
@@ -139,7 +153,7 @@ function App() {
     fetchData();
     const interval = setInterval(fetchData, 5000); // Faster polling for real-time feel
     return () => clearInterval(interval);
-  }, []);
+  }, [prevFocusMode]); // Add dependency for tracking
 
   const toggleFocusMode = async () => {
     try {
@@ -288,8 +302,8 @@ function App() {
                   <Routes>
                     <Route index element={<ManagePage setActiveTab={(id) => navigate(`/manage/${id.replace('manage-', '')}`)} />} />
                     <Route path="whatsapp" element={<WhatsAppManage />} />
-                    <Route path="instagram" element={<InstagramManage />} />
-                    <Route path="gmail" element={<GmailManage />} />
+                    <Route path="instagram" element={<InstagramManage setActiveTab={(id) => navigate(`/manage/${id.replace('manage-', '')}`)} />} />
+                    <Route path="gmail" element={<GmailManage gmailInfo={stats.gmailInfo} />} />
                     <Route path="outlook" element={<OutlookManage />} />
                   </Routes>
                 </motion.div>
@@ -297,7 +311,7 @@ function App() {
 
               <Route path="/schedule" element={
                 <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit">
-                  <CalendarControl />
+                  <CalendarControl googleInfo={stats.googleInfo} />
                 </motion.div>
               } />
 
@@ -349,6 +363,13 @@ function App() {
               } />
             </Routes>
           </AnimatePresence>
+
+          {/* 🛡️ RECOVERY MODAL PORTAL */}
+          <FocusRecoveryModal 
+             isOpen={showRecovery}
+             onClose={() => setShowRecovery(false)}
+             digest={lastDigest}
+          />
         </div>
       </main>
     </div>
